@@ -1,5 +1,6 @@
 # Interactive All-Hex Meshing via Cuboid Decomposition
 Lingxiao Li, Paul Zhang, Dmitriy Smirnov, Mazdak Abulnaga, Justin Solomon
+
 SIGGRAPH Asia 2021
 
 ## Organization
