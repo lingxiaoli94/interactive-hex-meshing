@@ -1,0 +1,10 @@
+glslangValidator -V -o forward_vert.spv forward.vert
+glslangValidator -V -o forward_frag.spv forward.frag
+glslangValidator -V -o deferred_geometry_vert.spv deferred_geometry.vert
+glslangValidator -V -o deferred_geometry_frag.spv deferred_geometry.frag
+glslangValidator -V -o offscreen_vert.spv offscreen.vert
+glslangValidator -V -o deferred_lighting_frag.spv deferred_lighting.frag
+glslangValidator -V -o deferred_transparent_frag.spv deferred_transparent.frag
+glslangValidator -V -o deferred_ssao_frag.spv deferred_ssao.frag
+glslangValidator -V -o imgui_vert.spv imgui.vert
+glslangValidator -V -o imgui_frag.spv imgui.frag
