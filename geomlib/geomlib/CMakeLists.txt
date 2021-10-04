@@ -12,4 +12,4 @@ file(GLOB geomlib_src *.cpp io/*.cpp *.cu autograd/*.cpp)
 cuda_add_library(geomlib ${geomlib_src})
 
 target_include_directories(geomlib PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/../")
-target_link_libraries(geomlib eigen CUDA::cudart CUDA::cusolver ${TORCH_LIBRARIES} OpenMP::OpenMP_CXX spdlog)
+target_link_libraries(geomlib eigen CUDA::cudart CUDA::cusolver CUDA::cupti ${TORCH_LIBRARIES} OpenMP::OpenMP_CXX spdlog)
