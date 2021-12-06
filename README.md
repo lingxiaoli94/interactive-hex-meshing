@@ -1,7 +1,19 @@
 # Interactive All-Hex Meshing via Cuboid Decomposition
-Lingxiao Li, Paul Zhang, Dmitriy Smirnov, Mazdak Abulnaga, Justin Solomon
 
-SIGGRAPH Asia 2021
+![teaser](https://user-images.githubusercontent.com/38452438/144882120-359ea450-03f8-4267-93f4-6a78f9ffff80.png)
+**[Video demonstration](https://www.dropbox.com/s/v687elfwgjnzfx4/demo.mp4?dl=0)**
+
+This repository contains an interactive software to the PolyCube-based hex-meshing problem. You can solve hex meshing by playing minecraft!
+
+Features include:
+- a 4-stage interactive pipeline that can robustly generate high-quality hex meshes from an input tetrahedral mesh;
+- extensive user control over each stage, such as editing the voxelized PolyCube, positioning surface vertices, and exploring the trade-off among competing quality metrics;
+- automatic alternatives based on GPU-powered continuous optimization that can run at interactive speed.
+
+It is the original implementation of the SIGGRAPH Asia 2021 paper "Interactive All-Hex Meshing via Cuboid Decomposition" by 
+Lingxiao Li, Paul Zhang, Dmitriy Smirnov, Mazdak Abulnaga, Justin Solomon.
+**Check out our [paper](https://arxiv.org/pdf/2109.06279.pdf) for a complete description of our pipeline!**
+
 
 ## Organization
 There are three main components of the project.
@@ -14,7 +26,7 @@ In addition,
 - The `external` folder contains additional dependencies that are included in the repo.
 
 ## Dependencies
-Main dependencies that are not included in the repo:
+Main dependencies that are not included in the repo and should be installed first:
 - CMake
 - CUDA (tested with 11.2, 11.3, 11.4) and cuDNN
 - Pytorch C++ frontend (tested with 1.7, 1.8, 1.9)
@@ -36,7 +48,7 @@ There are additional dependencies in `external` and should be built correctly wi
 ## Linux Instruction
 The instruction is slightly different on various Linux distributions. We have tested on Arch Linux and Ubuntu 20.04.
 First install all dependencies above using the respective package manager. 
-Then download and unzip [Pytorch C++ frontend](https://pytorch.org/get-started/locally/) for Linux (tested with CUDA 11.1 version with cxx11 ABI).
+Then download and unzip [Pytorch C++ frontend](https://pytorch.org/get-started/locally/) for Linux (tested with cxx11 ABI) -- it should be under the tab `Libtorch > C++/Java > CUDA 11.x`.
 Add `Torch_DIR=<unzipped folder>` to your environment variable lists (or add your unzipped folder to `CMAKE_PREFIX_PATH`).
 Then clone the repo (**be sure to use `--recursive` to clone the submodules as well**).
 Next run the usual cmake/make commands to build target `hex` in Debug or Release mode:
@@ -57,7 +69,7 @@ Compiling on Windows is trickier than on Linux. The following procedure has been
 - Download and install cuDNN for Windows (this amounts to copying a bunch of `dll`'s to the CUDA path)
 - Download and install the newest Vulkan SDK binary for Windows
 - Download and install Python3
-- Download and unzip [Pytorch C++ frontend](https://pytorch.org/get-started/locally/) for Windows (tested with CUDA 11.1 version). Then add `TORCH_DIR=<unzipped folder>` to your environment variable lists.
+- Download and unzip [Pytorch C++ frontend](https://pytorch.org/get-started/locally/) for Windows. Then add `TORCH_DIR=<unzipped folder>` to your environment variable lists.
 - Download and install HDF5 for Windows
 - In VS2019, install CMake tools, and then build the project following [this](https://docs.microsoft.com/en-us/cpp/build/cmake-projects-in-visual-studio?view=msvc-160)
 This should generate an executable under `bin/Debug` or `bin/Release`.
