@@ -2,6 +2,7 @@ build
 workspace
 production
 screenshots
+results
 bin
 assets/hard
 assets/tet_meshes

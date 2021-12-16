@@ -28,8 +28,8 @@ In addition,
 ## Dependencies
 Main dependencies that are not included in the repo and should be installed first:
 - CMake
-- CUDA (tested with 11.2, 11.3, 11.4) and cuDNN
-- Pytorch C++ frontend (tested with 1.7, 1.8, 1.9)
+- CUDA (tested with 11.2, 11.3, 11.4, 11.5) and cuDNN
+- Pytorch C++ frontend (tested with 1.7, 1.8, 1.9, 1.10)
 - Vulkan SDK
 - Python3
 - HDF5
