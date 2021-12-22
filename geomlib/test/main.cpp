@@ -60,8 +60,10 @@ void test_generalized_triangle_projection() {
 }
 
 void test_generalized_tetrahedron_projection() {
-  float points_data[] = {1.5, 0.6, 0.0};
-  float vertices_data[] = {1, 0, 0, 0, 0, 1, 0, 1, 0, 0, 0, 0};
+  /* float points_data[] = {1.5, 0.6, 0.0}; */
+  /* float vertices_data[] = {1, 0, 0, 0, 0, 1, 0, 1, 0, 0, 0, 0}; */
+  float points_data[] = {0, 0, 1};
+  float vertices_data[] = {0, 0, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0};
   int64_t tets_data[] = {0, 1, 2, 3};
 
   auto points =
@@ -74,9 +76,9 @@ void test_generalized_tetrahedron_projection() {
   auto result_dists = result[0];
   auto result_idxs = result[1];
   auto result_weights = result[2];
-  std::cout << "dists: " << result_dists << std::endl;
-  std::cout << "idxs: " << result_idxs << std::endl;
-  std::cout << "weights: " << result_weights << std::endl;
+  std::cout << "output dists: " << result_dists << std::endl;
+  std::cout << "output idxs: " << result_idxs << std::endl;
+  std::cout << "output weights: " << result_weights << std::endl;
 }
 
 void test_matmul() {
@@ -98,6 +100,6 @@ void test_matmul() {
 
 int main() {
   // test_generalized_triangle_projection();
-  // test_generalized_tetrahedron_projection();
-  test_matmul();
+  test_generalized_tetrahedron_projection();
+  /* test_matmul(); */
 }
