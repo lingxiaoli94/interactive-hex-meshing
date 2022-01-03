@@ -3,7 +3,7 @@
 ![teaser](https://user-images.githubusercontent.com/38452438/144882120-359ea450-03f8-4267-93f4-6a78f9ffff80.png)
 **[Video demonstration](https://www.dropbox.com/s/v687elfwgjnzfx4/demo.mp4?dl=0)**
 
-This repository contains an interactive software to the PolyCube-based hex-meshing problem. You can solve hex meshing by playing minecraft!
+This repository contains interactive software for the PolyCube-based hex-meshing problem. You can solve hex meshing by playing minecraft!
 
 Features include:
 - a 4-stage interactive pipeline that can robustly generate high-quality hex meshes from an input tetrahedral mesh;
