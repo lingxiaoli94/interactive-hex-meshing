@@ -25,7 +25,7 @@ In addition,
 - The `assets` folder contains a small number of tetrahedral meshes to test on, but you can include your own meshes easily (if you only have triangular meshes, try using TetGen or [this](https://github.com/wildmeshing/fTetWild) to mesh the interior first).
 - The `external` folder contains additional dependencies that are included in the repo.
 - In addition, [here](https://www.dropbox.com/s/kv4ojktq95ptw89/results.zip?dl=0) you can find `results.zip` contains the `*.h5` project file for each model in the Table 2 of the paper. The `*.h5` project files can be loaded in our software using `File > Open`.
-- 
+
 ## Dependencies
 Main dependencies that are not included in the repo and should be installed first:
 - CMake
