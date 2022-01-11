@@ -11,7 +11,7 @@ TriangularMeshSampler::TriangularMeshSampler(torch::Tensor vertices,
   auto v0 = vertices.index({faces.index({Slice(), 0}), Slice()});
   auto v1 = vertices.index({faces.index({Slice(), 1}), Slice()});
   auto v2 = vertices.index({faces.index({Slice(), 2}), Slice()});
-  areas_ = (v1 - v0).cross(v2).norm(2, -1) / 2;
+  areas_ = (v1 - v0).cross(v2 - v0).norm(2, -1) / 2;
 }
 
 torch::Tensor TriangularMeshSampler::Sample(int batch_size) {
