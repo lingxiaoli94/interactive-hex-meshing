@@ -383,15 +383,15 @@ void Serializer::SaveHexMesh(const HexahedralMesh& mesh,
                              const std::string& file_path,
                              std::function<Vector3f(Vector3f)> vertex_map) {
   std::ofstream ofs(file_path);
-  ofs << "MeshVersionFormatted 1\nDimension 3\n";
+  ofs << "MeshVersionFormatted 1\nDimension 3\n\n";
   auto& vertices = mesh.GetVertices();
-  ofs << fmt::format("Vertices {}\n", vertices.size());
+  ofs << fmt::format("Vertices\n{}\n", vertices.size());
   for (int i = 0; i < static_cast<int>(vertices.size()); i++) {
     auto v = vertex_map(vertices[i]);
     ofs << fmt::format("{:6f} {:6f} {:6f} 0\n", v(0), v(1), v(2));
   }
   auto& hexes = mesh.GetHexes();
-  ofs << fmt::format("Hexahedra {}\n", hexes.size());
+  ofs << fmt::format("Hexahedra\n{}\n", hexes.size());
   for (int i = 0; i < static_cast<int>(hexes.size()); i++) {
     std::stringstream ss;
     for (int k = 0; k < 8; k++) {
