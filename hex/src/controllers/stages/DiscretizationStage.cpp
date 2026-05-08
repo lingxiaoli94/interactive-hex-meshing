@@ -2,6 +2,7 @@
 
 #include <imgui.h>
 #include <models/PolycubeGraph.h>
+#include <yaml-cpp/yaml.h>
 
 #include "GLFW/glfw3.h"
 #include "controllers/GlobalController.h"
@@ -128,6 +129,23 @@ void DiscretizationStage::FinalizePolycube() {
 
 void DiscretizationStage::SwitchTo() { PipelineStage::SwitchTo(); }
 void DiscretizationStage::SwitchFrom() { PipelineStage::SwitchFrom(); }
+
+void DiscretizationStage::RunFromScript(const YAML::Node& cfg) {
+  if (!global_controller_.GetGlobalState().HasPolycube()) {
+    throw std::runtime_error(
+        "[script] discretization requires a polycube; load an HDF5 that has "
+        "one (post-decomposition stage)");
+  }
+  if (cfg["hex_size"]) hex_size_ = cfg["hex_size"].as<float>();
+  if (cfg["round_to_nearest"])
+    round_to_nearest_ = cfg["round_to_nearest"].as<bool>();
+  if (cfg["padding"]) padding_ = cfg["padding"].as<bool>();
+
+  LOGI("[script] discretization: hex_size={}, round_to_nearest={}, padding={}",
+       hex_size_, round_to_nearest_, padding_);
+  DiscretizePolycube();
+  FinalizePolycube();
+}
 
 bool DiscretizationStage::HandleInputEvent(const vkoo::InputEvent& event) {
   static StopWatch stop_watch;

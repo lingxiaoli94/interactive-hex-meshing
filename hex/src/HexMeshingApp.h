@@ -20,6 +20,7 @@ class HexMeshingApp : public vkoo::Application {
   void Prepare() override;
   void DrawGui() override;
   Settings& GetSettings();
+  GlobalController& GetGlobalController() { return *global_controller_; }
   void UpdatePipelines();
   void MainLoop() override;
 

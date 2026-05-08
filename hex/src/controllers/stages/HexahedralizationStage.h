@@ -10,6 +10,10 @@
 #include "views/QuadSurfaceView.h"
 #include "views/TriSurfaceView.h"
 
+namespace YAML {
+class Node;
+}
+
 namespace hex {
 class HexahedralizationStage : public PipelineStage {
  public:
@@ -27,6 +31,11 @@ class HexahedralizationStage : public PipelineStage {
   void PrepareHexDeformation();
   void OptimizeHexDeformation(int steps);
   void Reset();
+
+  // Drives the stage from a YAML script config. Reads inversion_free flag and
+  // deformer weights, forces blocking optimizer mode, runs Init -> Prepare ->
+  // Optimize. Builds GlobalState::result_mesh_ via existing code paths.
+  void RunFromScript(const YAML::Node& cfg);
 
  private:
   void DrawHexahedralizationWindow();

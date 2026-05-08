@@ -5,6 +5,10 @@
 #include "models/QuadrilateralMesh.h"
 #include "views/HexCollectionView.h"
 
+namespace YAML {
+class Node;
+}
+
 namespace hex {
 class DiscretizationStage : public PipelineStage {
  public:
@@ -18,6 +22,11 @@ class DiscretizationStage : public PipelineStage {
 
   void DiscretizePolycube();
   void FinalizePolycube();
+
+  // Drives the stage from a YAML script config. Reads hex_size, padding,
+  // round_to_nearest from the node (using current values as defaults), then
+  // runs DiscretizePolycube() + FinalizePolycube() in sequence.
+  void RunFromScript(const YAML::Node& cfg);
 
  private:
   enum class Status { Idle, Digging, Extrusion };

@@ -49,6 +49,11 @@ class GlobalController {
   void LoadResultMesh(const std::string& file_path);
   void ExportTargetComplex(const std::string& selected_file);
 
+  // Programmatic project I/O for the CLI script runner. Mirrors File->Open
+  // and File->Save in the menu bar but without the file browser dialog.
+  void OpenProject(const std::string& file_path);
+  void SaveProject(const std::string& file_path);
+
   void UpdateCameraSettings();
   void InitArcBallCamera();
 

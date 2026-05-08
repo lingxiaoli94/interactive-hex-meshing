@@ -361,6 +361,18 @@ void GlobalController::LoadResultMesh(const std::string& file_path) {
   global_view_->UpdateFilteredHexView(*global_state_, FilteringSetting{});
 }
 
+void GlobalController::OpenProject(const std::string& file_path) {
+  global_state_ = GlobalState::LoadFromFile(file_path);
+  RebuildViewsAndStages();
+  project_name_ = fs::path(file_path).filename().string();
+  last_visited_path_ = fs::path(file_path).parent_path();
+}
+
+void GlobalController::SaveProject(const std::string& file_path) {
+  global_state_->SaveToFile(file_path);
+  last_visited_path_ = fs::path(file_path).parent_path();
+}
+
 void GlobalController::ExportTargetComplex(const std::string& selected_file) {
   if (!global_state_->HasResultMesh()) {
     LOGW("Cannot save result mesh if it does not exist!");

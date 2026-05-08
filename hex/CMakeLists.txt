@@ -3,6 +3,7 @@ find_package(HDF5 COMPONENTS CXX REQUIRED)
 
 file(GLOB hex_srcs
         ${CMAKE_CURRENT_SOURCE_DIR}/src/*.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/src/cli/*.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/src/models/*.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/src/optim/*.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/src/views/*.cpp

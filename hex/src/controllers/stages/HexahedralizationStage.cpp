@@ -4,6 +4,7 @@
 #include <geomlib/autograd/GeneralizedProjection.h>
 #include <geomlib/hausdorff_distance.h>
 #include <imgui.h>
+#include <yaml-cpp/yaml.h>
 
 #include <limits>
 #include <stdexcept>
@@ -439,6 +440,58 @@ void HexahedralizationStage::OptimizeHexDeformation(int num_steps) {
     });
   }
 }
+void HexahedralizationStage::RunFromScript(const YAML::Node& cfg) {
+  auto& global_state = global_controller_.GetGlobalState();
+  if (!global_state.HasPolycubeComplex() ||
+      !global_state.HasDeformedVolumeMesh() ||
+      !global_state.HasTargetVolumeMesh()) {
+    throw std::runtime_error(
+        "[script] hexahedralization requires polycube_complex + deformed_mesh "
+        "+ target_mesh; load an HDF5 with all three (post-discretization)");
+  }
+
+  bool inversion_free =
+      cfg["inversion_free"] ? cfg["inversion_free"].as<bool>() : true;
+  if (cfg["projection_weight"])
+    hex_deformer_options_.projection_weight =
+        cfg["projection_weight"].as<float>();
+  if (cfg["hausdorff_weight"])
+    hex_deformer_options_.hausdorff_weight =
+        cfg["hausdorff_weight"].as<float>();
+  if (cfg["fairness_weight"])
+    hex_deformer_options_.fairness_weight = cfg["fairness_weight"].as<float>();
+  if (cfg["smoothness_weight"])
+    hex_deformer_options_.smoothness_weight =
+        cfg["smoothness_weight"].as<float>();
+  if (cfg["learning_rate"])
+    hex_deformer_options_.learning_rate = cfg["learning_rate"].as<float>();
+  // Force blocking optimization for scripted runs (no async snapshot thread).
+  hex_deformer_options_.snapshot_freq = -1;
+
+  int steps = cfg["steps"] ? cfg["steps"].as<int>() : 100;
+
+  LOGI(
+      "[script] hexahedralization: inversion_free={}, projection={}, "
+      "hausdorff={}, fairness={}, smoothness={}, lr={}, steps={}",
+      inversion_free, hex_deformer_options_.projection_weight,
+      hex_deformer_options_.hausdorff_weight,
+      hex_deformer_options_.fairness_weight,
+      hex_deformer_options_.smoothness_weight,
+      hex_deformer_options_.learning_rate, steps);
+
+  // Init pullback + (if inversion_free) the inversion-free 200-step init.
+  // In non-expert mode this auto-resets hex_complex_deformer_ at the end.
+  InitTargetComplex(/*use_pullback=*/true, /*indirect=*/inversion_free,
+                    /*transport=*/inversion_free);
+
+  // Run additional user-requested optimization steps with the configured
+  // weights. Must rebuild deformer because Init resets it.
+  if (steps > 0) {
+    PrepareHexDeformation();
+    OptimizeHexDeformation(steps);
+  }
+}
+
 void HexahedralizationStage::FetchSnapshot() {
   auto& global_state = global_controller_.GetGlobalState();
   auto& target_complex = global_state.GetTargetComplex();
