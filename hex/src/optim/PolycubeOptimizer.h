@@ -31,6 +31,12 @@ class PolycubeOptimizer {
                              const Polycube& polycube, Cuboid& subtract_cuboid);
   float ComputeCurrentLoss();
   Polycube GetSnapshot();
+  // Final optimized polycube built from the current optimizer weights. Unlike
+  // GetSnapshot() (which only reflects the periodic snapshot captured every
+  // snapshot_freq steps), this always returns the latest result -- needed by
+  // the headless script runner, which forces snapshot_freq = -1 and has no GUI
+  // frame loop to pull intermediate snapshots back into GlobalState.
+  Polycube GetOptimizedPolycube();
   Status GetStatus();
   void SetIdle();
   bool IsIdle();
@@ -45,8 +51,6 @@ class PolycubeOptimizer {
   void PrepareGPUMeshData(const TetrahedralMesh& target_mesh);
   std::tuple<torch::Tensor, Vector3f> CreateAmbientGrid(int discrete_num,
                                                         float padding = 0.0f);
-
-  Polycube GetOptimizedPolycube();
 
   torch::Tensor TransformToCuboidParams(const torch::Tensor& weight);
   torch::Tensor TransformToWeight(const torch::Tensor& cuboid_params);

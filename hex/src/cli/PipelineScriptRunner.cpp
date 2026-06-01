@@ -7,7 +7,10 @@
 #include <stdexcept>
 
 #include "HexMeshingApp.h"
+#include "cli/MetricsDumper.h"
 #include "controllers/GlobalController.h"
+#include "controllers/stages/DecompositionStage.h"
+#include "controllers/stages/DeformationStage.h"
 #include "controllers/stages/DiscretizationStage.h"
 #include "controllers/stages/HexahedralizationStage.h"
 #include "logging.h"
@@ -119,15 +122,17 @@ bool PipelineScriptRunner::LoadAndRun(const std::string& yaml_path) {
 
     LOGI("[script] === running stage {} ({}) ===", idx, stage_name);
     try {
-      if (stage_name == "discretization") {
+      if (stage_name == "deformation") {
+        gc.GetDeformationStage().RunFromScript(stage_cfg);
+      } else if (stage_name == "decomposition") {
+        gc.GetDecompositionStage().RunFromScript(stage_cfg);
+      } else if (stage_name == "discretization") {
         gc.GetDiscretizationStage().RunFromScript(stage_cfg);
       } else if (stage_name == "hexahedralization") {
         gc.GetHexahedralizationStage().RunFromScript(stage_cfg);
         ran_hexahedralization = true;
       } else {
-        std::cerr << "[script] stage '" << stage_name
-                  << "' is not yet supported by the script runner (only "
-                     "discretization and hexahedralization in this build)"
+        std::cerr << "[script] unknown stage name '" << stage_name << "'"
                   << std::endl;
         return false;
       }
@@ -160,6 +165,25 @@ bool PipelineScriptRunner::LoadAndRun(const std::string& yaml_path) {
       gc.ExportTargetComplex(mesh_path);
     } catch (const std::exception& e) {
       std::cerr << "[script] export_mesh failed: " << e.what() << std::endl;
+      return false;
+    }
+  }
+
+  // ---- 4b. Optional quality-metrics sidecar ----
+  if (ran_hexahedralization && script["output"] &&
+      script["output"]["export_metrics"]) {
+    std::string metrics_rel =
+        script["output"]["export_metrics"].as<std::string>();
+    std::string metrics_path = ResolvePath(run_dir, metrics_rel);
+    try {
+      if (!gc.GetGlobalState().HasResultMesh()) {
+        throw std::runtime_error(
+            "no result_mesh in global state; hexahedralization did not "
+            "produce a final hex mesh");
+      }
+      DumpQualityMetrics(gc.GetGlobalState().GetResultMesh(), metrics_path);
+    } catch (const std::exception& e) {
+      std::cerr << "[script] export_metrics failed: " << e.what() << std::endl;
       return false;
     }
   }

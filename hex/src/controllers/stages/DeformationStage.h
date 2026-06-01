@@ -3,6 +3,10 @@
 #include "PipelineStage.h"
 #include "optim/CubicVolumetricDeformer.h"
 
+namespace YAML {
+class Node;
+}
+
 namespace hex {
 class DeformationStage : public PipelineStage {
  public:
@@ -11,6 +15,12 @@ class DeformationStage : public PipelineStage {
   void DrawStageWindow() override;
   void PrepareVolumetricDeformation();
   void Reoptimize(size_t num_steps);
+
+  // Drives the stage from a YAML script config. Reads cubeness/smoothness/
+  // distortion weights, learning rate, and step count from the node (using
+  // current values as defaults), then runs PrepareVolumetricDeformation() +
+  // Reoptimize() in sequence.
+  void RunFromScript(const YAML::Node& cfg);
 
  private:
   void UpdateDeformationViews();

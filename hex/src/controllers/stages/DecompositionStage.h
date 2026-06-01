@@ -7,6 +7,10 @@
 #include "models/TetrahedralMesh.h"
 #include "views/CuboidNode.h"
 
+namespace YAML {
+class Node;
+}
+
 namespace hex {
 class DecompositionStage : public PipelineStage {
  public:
@@ -21,6 +25,7 @@ class DecompositionStage : public PipelineStage {
   bool HandleInputEvent(const vkoo::InputEvent& event) override;
 
   void EstimateScale(const TetrahedralMesh& mesh);
+  void CreateSdfAndAnchors();
   void ResetPolycube();
   void AddNewCuboid(const Cuboid& cuboid);
   void DuplicateCuboid(int i);
@@ -31,8 +36,11 @@ class DecompositionStage : public PipelineStage {
   void FocusCuboid(int i);
   void UnfocusCuboid();
 
+  // Drives the stage from a YAML script config. Greedy auto-add N cuboids
+  // then run Reoptimize() blocking on the optimizer thread.
+  void RunFromScript(const YAML::Node& cfg);
+
  private:
-  void CreateSdfAndAnchors();
 
   void StartSubtractCuboid();
   void PerformSubtraction();

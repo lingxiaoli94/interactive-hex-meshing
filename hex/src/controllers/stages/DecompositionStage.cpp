@@ -1,10 +1,14 @@
 #include <GLFW/glfw3.h>
 #include <imgui.h>
 #include <vkoo/st/components/Tracing.h>
+#include <yaml-cpp/yaml.h>
+
+#include <stdexcept>
 
 #include "DecompositionStage.h"
 #include "controllers/GlobalController.h"
 #include "logging.h"
+#include "models/GlobalState.h"
 #include "utility/ImGuiEx.h"
 #include "vkoo/core/InputEvent.h"
 
@@ -178,6 +182,68 @@ void DecompositionStage::SuggestNewCuboid(
   } else {
     LOGI("Failed to suggest a new cuboid!");
   }
+}
+
+void DecompositionStage::RunFromScript(const YAML::Node& cfg) {
+  auto& gs = global_controller_.GetGlobalState();
+  if (!gs.HasDeformedVolumeMesh()) {
+    throw std::runtime_error(
+        "[script] decomposition requires a deformed volume mesh; run "
+        "deformation first or load an HDF5 that has one");
+  }
+
+  if (cfg["grid_size"])
+    anchors_options_.grid_size = cfg["grid_size"].as<int>();
+  if (cfg["inside_only"])
+    anchors_options_.inside_only = cfg["inside_only"].as<bool>();
+  if (cfg["bbox_padding"])
+    anchors_options_.bbox_padding = cfg["bbox_padding"].as<float>();
+  if (cfg["surface_samples"])
+    anchors_options_.surface_samples = cfg["surface_samples"].as<int>();
+  if (cfg["perturbation"])
+    anchors_options_.perturbation = cfg["perturbation"].as<float>();
+
+  if (cfg["positive_l2_weight"])
+    options_.positive_l2_weight = cfg["positive_l2_weight"].as<float>();
+  if (cfg["negative_l2_weight"])
+    options_.negative_l2_weight = cfg["negative_l2_weight"].as<float>();
+  if (cfg["learning_rate"])
+    options_.learning_rate = cfg["learning_rate"].as<float>();
+  options_.snapshot_freq = -1;
+
+  int num_cuboids = cfg["num_cuboids"] ? cfg["num_cuboids"].as<int>() : 8;
+  std::string strat_str = cfg["suggest_strategy"]
+                              ? cfg["suggest_strategy"].as<std::string>()
+                              : "largest";
+  PolycubeOptimizer::SuggestStrategy strategy =
+      (strat_str == "simple") ? PolycubeOptimizer::SuggestStrategy::Simple
+                              : PolycubeOptimizer::SuggestStrategy::Largest;
+  int reopt_steps =
+      cfg["reopt_steps"] ? cfg["reopt_steps"].as<int>() : reoptimize_steps_;
+  reoptimize_steps_ = reopt_steps;
+
+  LOGI(
+      "[script] decomposition: num_cuboids={}, strategy={}, grid_size={}, "
+      "samples={}, reopt_steps={}",
+      num_cuboids, strat_str, anchors_options_.grid_size,
+      anchors_options_.surface_samples, reopt_steps);
+
+  CreateSdfAndAnchors();
+  ResetPolycube();
+  for (int i = 0; i < num_cuboids; ++i) {
+    SuggestNewCuboid(strategy);
+  }
+  Reoptimize(static_cast<size_t>(reopt_steps));
+  if (opt_thread_.joinable()) opt_thread_.join();
+
+  // The GUI pulls the optimized polycube back into GlobalState every frame via
+  // Update(); the script runner has no frame loop, so do it once here. Without
+  // this the un-optimized (raw cuboid-suggestion) polycube is what gets saved --
+  // the gradient refinement from Reoptimize() would be silently discarded.
+  gs.SetPolycube(
+      std::make_unique<Polycube>(polycube_optimizer_->GetOptimizedPolycube()));
+
+  LOGI("[script] decomposition done");
 }
 
 void DecompositionStage::AddNewCuboid(const Cuboid& cuboid) {
