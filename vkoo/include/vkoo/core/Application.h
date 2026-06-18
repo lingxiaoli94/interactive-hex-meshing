@@ -19,7 +19,11 @@ class Application {
   Application(bool enable_validation_layer);
   virtual ~Application();
 
-  virtual void Prepare();
+  // When headless is true, no GLFW window, Vulkan surface, swapchain or
+  // render-context are created (surfaceless Vulkan). The instance + logical
+  // device are still created so compute/view buffers can be allocated; nothing
+  // is ever presented. Default (false) is the unchanged GUI path.
+  virtual void Prepare(bool headless = false);
   virtual void Update(float delta_time);
   virtual void Draw(CommandBuffer& command_buffer, RenderTarget& render_target);
   virtual void DrawRenderPasses(CommandBuffer& command_buffer,
@@ -60,7 +64,10 @@ class Application {
   std::unique_ptr<st::Scene> scene_;
 
   std::unique_ptr<Gui> gui_;
-  GLFWwindow* window_;
+  GLFWwindow* window_{nullptr};
+
+  // Set by Prepare(); when true the window/surface/swapchain were skipped.
+  bool headless_{false};
 
   uint32_t starter_width_{1280};
   uint32_t starter_height_{720};
@@ -75,6 +82,6 @@ class Application {
   void ScrollCallback(double x_offset, double y_offset);
 
   bool enable_validation_layer_;
-  VkSurfaceKHR surface_;
+  VkSurfaceKHR surface_{VK_NULL_HANDLE};
 };
 }  // namespace vkoo

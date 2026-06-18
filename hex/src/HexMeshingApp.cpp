@@ -35,17 +35,25 @@ HexMeshingApp::~HexMeshingApp() {
   // device_->WaitIdle();
 }
 
-void HexMeshingApp::Prepare() {
-  Application::Prepare();
+void HexMeshingApp::Prepare(bool headless) {
+  Application::Prepare(headless);
 
   // Initialize HexConvention early to prevent race conditions caused by lazy
   // intialization.
   HexConvention::Initialize();
 
   CreateSampler();  // this also creates sampler
-  SetupScene();
-  SetupRenderPipelines();  // this should happen after samplers are created
-  gui_ = std::make_unique<vkoo::Gui>(*this, 20.0f);
+  SetupScene();     // builds the controller + views (allocate against device_)
+
+  // Render pipelines and the GUI exist only to draw to the swapchain, which is
+  // never created headless. Skip them; the script path reaches no draw/GUI code
+  // (MainLoop is never entered headless).
+  if (!headless) {
+    SetupRenderPipelines();  // this should happen after samplers are created
+    gui_ = std::make_unique<vkoo::Gui>(*this, 20.0f);
+  } else {
+    LOGI("Headless mode: skipped render pipelines and GUI.");
+  }
 }
 
 void HexMeshingApp::MainLoop() {
