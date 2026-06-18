@@ -36,10 +36,10 @@ HexComplexDeformer::HexComplexDeformer(
   }
   hex_jacobian_ = BuildHexJacobian(false) / hex_size_;
 
-  original_vertices_ = MatrixXfToTensor(original_surface.GetVertices()).cuda();
-  original_faces_ = MatrixXiToTensor(original_surface.GetFaces()).cuda();
+  original_vertices_ = MatrixXfToTensor(original_surface.GetVertices()).to(hex::ComputeDevice());
+  original_faces_ = MatrixXiToTensor(original_surface.GetFaces()).to(hex::ComputeDevice());
   original_face_normals_ =
-      MatrixXfToTensor(original_surface.GetFaceNormals()).cuda();
+      MatrixXfToTensor(original_surface.GetFaceNormals()).to(hex::ComputeDevice());
   original_face_normals_ /= original_face_normals_.norm(2, -1, true) + 1e-8f;
   original_proj_info_ = std::make_unique<geomlib::TriangularProjectionInfo>(
       original_vertices_, original_faces_);
@@ -53,7 +53,7 @@ HexComplexDeformer::HexComplexDeformer(
       hex_mat(i, j) = static_cast<int>(hexes[i][j]);
     }
   }
-  hex_corner_indices_ = MatrixXiToTensor(hex_mat).to(torch::kInt64).cuda();
+  hex_corner_indices_ = MatrixXiToTensor(hex_mat).to(torch::kInt64).to(hex::ComputeDevice());
 
   {
     auto& surface_indices_uint = polycube_complex.GetSurfaceIndices();
@@ -66,35 +66,35 @@ HexComplexDeformer::HexComplexDeformer(
         torch::from_blob(surface_indices.data(), {(int)surface_indices.size()},
                          torch::kInt32)
             .to(torch::kInt64)
-            .cuda();
+            .to(hex::ComputeDevice());
 
     rims_ = MatrixXiToTensor(ArrayVector3iToMatrixXi(
                                  polycube_complex.GetQuadComplex().GetRims()))
                 .to(torch::kInt64)
-                .cuda();
+                .to(hex::ComputeDevice());
 
     bi_edges_ =
         MatrixXiToTensor(ArrayVector2iToMatrixXi(
                              polycube_complex.GetQuadComplex().GetBiEdges()))
             .to(torch::kInt64)
-            .cuda();
+            .to(hex::ComputeDevice());
 
     rings_ = MatrixXiToTensor(ArrayVector3iToMatrixXi(
                                   polycube_complex.GetQuadComplex().GetRing()))
                  .to(torch::kInt64)
-                 .cuda();
+                 .to(hex::ComputeDevice());
 
     auto degrees = polycube_complex.GetQuadComplex().GetDegrees();
     surface_degrees_ =
         torch::from_blob(degrees.data(), {(int)degrees.size()}, torch::kInt32)
             .to(torch::kInt64)
-            .cuda();
+            .to(hex::ComputeDevice());
   }
 
   // Initialize positions to be the same as the ones in the complex (in
   // particular the surface positions should come from quad deformation).
   X_ = MatrixXfToTensor(ArrayVector3fToMatrixXf(target_complex.GetVertices()))
-           .cuda();
+           .to(hex::ComputeDevice());
   opt_variables_ = std::vector<torch::Tensor>{X_};
   if (options_.mode == Mode::LiftedProjection) {
     auto surface_X = X_.index({surface_indices_, Slice()});
@@ -114,7 +114,7 @@ HexComplexDeformer::HexComplexDeformer(
 void HexComplexDeformer::SetPulledbackPositions(
     const std::vector<Vector3f>& positions) {
   pulled_back_positions_ =
-      MatrixXfToTensor(ArrayVector3fToMatrixXf(positions)).cuda();
+      MatrixXfToTensor(ArrayVector3fToMatrixXf(positions)).to(hex::ComputeDevice());
 }
 
 void HexComplexDeformer::ResetOptimizer() {
@@ -142,7 +142,7 @@ torch::Tensor HexComplexDeformer::BuildHexJacobian(
         MatrixXfToTensor(HexConvention::GetPrincipleAxes()));
   }
   auto hex_jacobian =
-      torch::stack(hex_jacobian_tensors, 0).cuda();  // 8x8x3 or 9x8x3
+      torch::stack(hex_jacobian_tensors, 0).to(hex::ComputeDevice());  // 8x8x3 or 9x8x3
 
   return hex_jacobian;
 }
@@ -171,7 +171,7 @@ void HexComplexDeformer::Optimize(
         torch::from_blob(fixed_indices_copy.data(),
                          {(int)fixed_surface_indices.size()}, torch::kInt32)
             .to(torch::kInt64)
-            .cuda();
+            .to(hex::ComputeDevice());
   }
   while (global_step_ < target_step && !force_stop_) {
     global_step_++;
@@ -247,7 +247,7 @@ std::vector<torch::Tensor> HexComplexDeformer::ComputeLoss() {
 
   // Equal weight since all hexes in polycube have the same volume.
   auto distortion_weight =
-      torch::ones({J.size(0) * J.size(1)}, torch::kFloat32).cuda() /
+      torch::ones({J.size(0) * J.size(1)}, torch::kFloat32).to(hex::ComputeDevice()) /
       (J.size(0) * J.size(1));
   auto distortion_loss = ComputeDistortionLoss(
       J.reshape({-1, 3, 3}), distortion_weight, distortion_options_);
@@ -367,7 +367,7 @@ std::vector<torch::Tensor> HexComplexDeformer::ComputeLoss() {
 void HexComplexDeformer::PrepareCustomLoss() {
   if (options_.custom_quality == CustomQuality::None) {
     custom_loss_fn_ = []() {
-      return torch::zeros({1}, torch::kFloat32).cuda();
+      return torch::zeros({1}, torch::kFloat32).to(hex::ComputeDevice());
     };
   } else if (options_.custom_quality == CustomQuality::ScaledJacobian) {
     auto aug_hex_jacobians =

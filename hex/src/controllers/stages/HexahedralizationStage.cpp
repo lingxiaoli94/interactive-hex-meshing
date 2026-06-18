@@ -531,15 +531,15 @@ void HexahedralizationStage::ComputeHausdorffDistance() {
   auto& quad_complex = global_state.GetTargetComplex().GetQuadComplex();
   auto quad_faces = quad_complex.GetTriangularFaces();
 
-  auto vertices0 = MatrixXfToTensor(input_mesh.GetVertices()).cuda();
+  auto vertices0 = MatrixXfToTensor(input_mesh.GetVertices()).to(hex::ComputeDevice());
   auto faces0 =
-      MatrixXiToTensor(input_mesh.GetFaces()).cuda().to(torch::kInt64);
+      MatrixXiToTensor(input_mesh.GetFaces()).to(hex::ComputeDevice()).to(torch::kInt64);
   auto vertices1 =
       MatrixXfToTensor(ArrayVector3fToMatrixXf(quad_complex.GetVertices()))
-          .cuda();
+          .to(hex::ComputeDevice());
   auto faces1 =
       MatrixXiToTensor(ArrayVector3iToMatrixXi(quad_complex.GetRing()))
-          .cuda()
+          .to(hex::ComputeDevice())
           .to(torch::kInt64);
   hausdorff_distance_ = geomlib::ComputeHausdorffDistance(
       vertices0, faces0, vertices1, faces1, kHausdorffDistanceBatchSize,
@@ -591,9 +591,9 @@ std::vector<Vector3f> HexahedralizationStage::PullPolycubeVolumeBack(
 
   auto result = geomlib::GeneralizedTetrahedronProjection<3>::apply(
       MatrixXfToTensor(ArrayVector3fToMatrixXf(target_complex.GetVertices()))
-          .cuda(),
-      MatrixXfToTensor(deformed_volume_mesh.GetVertices()).cuda(),
-      MatrixXiToTensor(deformed_volume_mesh.GetTets()).cuda());
+          .to(hex::ComputeDevice()),
+      MatrixXfToTensor(deformed_volume_mesh.GetVertices()).to(hex::ComputeDevice()),
+      MatrixXiToTensor(deformed_volume_mesh.GetTets()).to(hex::ComputeDevice()));
 
   auto tet_ids = TensorToVectorXi(result[1].detach().cpu());
   auto bary_coords = TensorToMatrixXf(result[2].detach().cpu());

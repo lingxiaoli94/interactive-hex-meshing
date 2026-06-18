@@ -7,8 +7,11 @@ namespace geomlib {
 std::tuple<float, float> ComputeHausdorffDistance(
     torch::Tensor vertices0, torch::Tensor faces0, torch::Tensor vertices1,
     torch::Tensor faces1, int batch_size, int repeat_times) {
-  assert(vertices0.is_cuda() && vertices1.is_cuda() && faces0.is_cuda() &&
-         faces1.is_cuda());
+  // Device-agnostic: works on CPU (--device cpu) or CUDA, as long as all inputs
+  // share a device (the projection kernel below dispatches on it).
+  assert(vertices0.device() == faces0.device() &&
+         vertices1.device() == faces1.device() &&
+         vertices0.device() == vertices1.device());
   TriangularMeshSampler sampler0{vertices0, faces0};
   TriangularMeshSampler sampler1{vertices1, faces1};
 

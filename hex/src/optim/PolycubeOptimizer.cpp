@@ -20,7 +20,7 @@ const float kSubtractExtra = 0.005f;
 }  // namespace
 
 PolycubeOptimizer::PolycubeOptimizer(Options options)
-    : options_{options}, device_{torch::kCUDA}, status_{Status::Idle} {}
+    : options_{options}, device_{hex::ComputeDevice()}, status_{Status::Idle} {}
 
 void PolycubeOptimizer::Optimize(const TetrahedralMesh& mesh,
                                  const Polycube& polycube, size_t num_steps,
@@ -235,7 +235,7 @@ std::tuple<torch::Tensor, Vector3f> PolycubeOptimizer::CreateAmbientGrid(
           .cpu());
   auto grids = torch::meshgrid(steps);
 
-  return {torch::stack(grids, -1).to(torch::kFloat32).cuda(),
+  return {torch::stack(grids, -1).to(torch::kFloat32).to(hex::ComputeDevice()),
           delta};  // DxDxDx3
 }
 

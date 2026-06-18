@@ -15,10 +15,10 @@ struct MakeVec3;
 template <>
 struct MakeVec3<float> {
   typedef float3 type;
-  static __device__ float3 Create(float x, float y, float z) {
+  static __host__ __device__ float3 Create(float x, float y, float z) {
     return make_float3(x, y, z);
   }
-  static __device__ float3 FromRaw(const float* arr) {
+  static __host__ __device__ float3 FromRaw(const float* arr) {
     return make_float3(arr[0], arr[1], arr[2]);
   }
 };
@@ -26,10 +26,10 @@ struct MakeVec3<float> {
 template <>
 struct MakeVec3<double> {
   typedef double3 type;
-  static __device__ double3 Create(double x, double y, double z) {
+  static __host__ __device__ double3 Create(double x, double y, double z) {
     return make_double3(x, y, z);
   }
-  static __device__ double3 FromRaw(const double* arr) {
+  static __host__ __device__ double3 FromRaw(const double* arr) {
     return make_double3(arr[0], arr[1], arr[2]);
   }
 };
@@ -102,71 +102,71 @@ __device__ void WarpReduceSum(volatile scalar_t* vals, size_t tid) {
 }
 
 template <typename scalar_t>
-__device__ inline int sign(scalar_t x) {
+__host__ __device__ inline int sign(scalar_t x) {
   int t = x < 0 ? -1 : 0;
   return x > 0 ? 1 : t;
 }
 
 template <typename scalar_t>
-__device__ inline scalar_t clamp01(scalar_t x) {
+__host__ __device__ inline scalar_t clamp01(scalar_t x) {
   return x < 0 ? 0 : (x > 1 ? 1 : x);
 }
 
 template <typename scalar_t>
-__device__ inline typename MakeVec3<scalar_t>::type operator-(
+__host__ __device__ inline typename MakeVec3<scalar_t>::type operator-(
     const typename MakeVec3<scalar_t>::type& a,
     const typename MakeVec3<scalar_t>::type& b) {
   return MakeVec3<scalar_t>::Create(a.x - b.x, a.y - b.y, a.z - b.z);
 }
 
 template <typename scalar_t>
-__device__ inline typename MakeVec3<scalar_t>::type operator+(
+__host__ __device__ inline typename MakeVec3<scalar_t>::type operator+(
     const typename MakeVec3<scalar_t>::type& a,
     const typename MakeVec3<scalar_t>::type& b) {
   return MakeVec3<scalar_t>::Create(a.x + b.x, a.y + b.y, a.z + b.z);
 }
 
 template <typename scalar_t>
-__device__ inline typename MakeVec3<scalar_t>::type operator*(
+__host__ __device__ inline typename MakeVec3<scalar_t>::type operator*(
     const typename MakeVec3<scalar_t>::type& a,
     const typename MakeVec3<scalar_t>::type& b) {
   return MakeVec3<scalar_t>::Create(a.x * b.x, a.y * b.y, a.z * b.z);
 }
 
 template <typename scalar_t>
-__device__ inline typename MakeVec3<scalar_t>::type operator*(
+__host__ __device__ inline typename MakeVec3<scalar_t>::type operator*(
     scalar_t a, const typename MakeVec3<scalar_t>::type& b) {
   return MakeVec3<scalar_t>::Create(a * b.x, a * b.y, a * b.z);
 }
 
 template <typename scalar_t>
-__device__ inline typename MakeVec3<scalar_t>::type operator/(
+__host__ __device__ inline typename MakeVec3<scalar_t>::type operator/(
     const typename MakeVec3<scalar_t>::type& a,
     const typename MakeVec3<scalar_t>::type& b) {
   return MakeVec3<scalar_t>::Create(a.x / b.x, a.y / b.y, a.z / b.z);
 }
 
 template <typename scalar_t>
-__device__ inline typename MakeVec3<scalar_t>::type operator/(
+__host__ __device__ inline typename MakeVec3<scalar_t>::type operator/(
     const typename MakeVec3<scalar_t>::type& a, scalar_t b) {
   return MakeVec3<scalar_t>::Create(a.x / b, a.y / b, a.z / b);
 }
 
 template <typename scalar_t>
-__device__ inline scalar_t dot(const typename MakeVec3<scalar_t>::type& a,
+__host__ __device__ inline scalar_t dot(const typename MakeVec3<scalar_t>::type& a,
                                const typename MakeVec3<scalar_t>::type& b) {
   return a.x * b.x + a.y * b.y + a.z * b.z;
 }
 
 template <typename scalar_t>
-__device__ inline scalar_t distance_sqr(
+__host__ __device__ inline scalar_t distance_sqr(
     const typename MakeVec3<scalar_t>::type& a,
     const typename MakeVec3<scalar_t>::type& b) {
   return dot(a - b, a - b);
 }
 
 template <typename scalar_t>
-__device__ inline typename MakeVec3<scalar_t>::type cross(
+__host__ __device__ inline typename MakeVec3<scalar_t>::type cross(
     const typename MakeVec3<scalar_t>::type& a,
     const typename MakeVec3<scalar_t>::type& b) {
   return MakeVec3<scalar_t>::Create(
@@ -174,18 +174,18 @@ __device__ inline typename MakeVec3<scalar_t>::type cross(
 }
 
 template <typename scalar_t>
-__device__ inline scalar_t norm(const typename MakeVec3<scalar_t>::type& a) {
+__host__ __device__ inline scalar_t norm(const typename MakeVec3<scalar_t>::type& a) {
   return sqrt(dot(a, a));
 }
 
 template <typename scalar_t>
-__device__ inline typename MakeVec3<scalar_t>::type normalize(
+__host__ __device__ inline typename MakeVec3<scalar_t>::type normalize(
     const typename MakeVec3<scalar_t>::type& a) {
   return a / (norm(a) + static_cast<scalar_t>(kEpsilon));
 }
 
 template <typename scalar_t>
-__device__ inline bool IsOnSameSideOfPlane(
+__host__ __device__ inline bool IsOnSameSideOfPlane(
     const typename MakeVec3<scalar_t>::type& v0,
     const typename MakeVec3<scalar_t>::type& v1,
     const typename MakeVec3<scalar_t>::type& v2,
@@ -198,7 +198,7 @@ __device__ inline bool IsOnSameSideOfPlane(
 }
 
 template <typename scalar_t>
-__device__ inline bool IsPointInTetrahedron(
+__host__ __device__ inline bool IsPointInTetrahedron(
     const typename MakeVec3<scalar_t>::type& p,
     const typename MakeVec3<scalar_t>::type& v0,
     const typename MakeVec3<scalar_t>::type& v1,

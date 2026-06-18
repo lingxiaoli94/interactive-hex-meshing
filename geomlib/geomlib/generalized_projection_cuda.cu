@@ -14,7 +14,7 @@ namespace geomlib {
     namespace {
         const float kEps = 1e-8;
         template <int dim, typename scalar_t>
-            __device__ inline void ComputeBarycentricGradient(
+            __host__ __device__ inline void ComputeBarycentricGradient(
                     const scalar_t* e1, const scalar_t* e2, const scalar_t e1_dot_e2,
                     const scalar_t e1_norm_sqr, const scalar_t e2_norm_sqr, scalar_t* grad_w1,
                     scalar_t* grad_w2) {
@@ -39,7 +39,7 @@ namespace geomlib {
             }
 
         template <int dim, typename scalar_t>
-            __device__ void GeneralizedTriangleProjection(
+            __host__ __device__ void GeneralizedTriangleProjection(
                     const scalar_t* p, const scalar_t* v0, const scalar_t* e1,
                     const scalar_t* e2, const scalar_t e1_dot_e2, const scalar_t e1_norm_sqr,
                     const scalar_t e2_norm_sqr, const scalar_t* grad_w1,
@@ -127,7 +127,7 @@ namespace geomlib {
 
 
         template <int dim, typename scalar_t>
-            __device__ void GeneralizedTetrahedronProjection(
+            __host__ __device__ void GeneralizedTetrahedronProjection(
                     const scalar_t* p,              // D
                     const scalar_t* v0,             // D
                     const scalar_t* e_mat,          // 3xD,
@@ -336,21 +336,82 @@ namespace geomlib {
                     copy_vec<3>(&result_weights[i * 3], min_weights);
                 }
             }
+
+        // ---- CPU reference loops (--device cpu): the SAME per-element
+        // projection math as the kernels above (now __host__ __device__), run as
+        // a serial host loop with a plain min-reduction. Results match the CUDA
+        // path by construction. ----
+        template <int dim, typename scalar_t>
+            void GeneralizedTriangleProjectionCpu(
+                    const scalar_t* points, size_t num_points, size_t num_faces,
+                    const scalar_t* v0, const scalar_t* e1, const scalar_t* e2,
+                    const scalar_t* e1_dot_e2, const scalar_t* e1_norm_sqr,
+                    const scalar_t* e2_norm_sqr, const scalar_t* grad_w1,
+                    const scalar_t* grad_w2, scalar_t* result_dists,
+                    int* result_idxs, scalar_t* result_w1, scalar_t* result_w2) {
+                for (size_t i = 0; i < num_points; i++) {
+                    const scalar_t* p = &points[i * dim];
+                    scalar_t min_dist = FLT_MAX;
+                    size_t min_idx = 0;
+                    scalar_t min_w1 = 0, min_w2 = 0;
+                    for (size_t j = 0; j < num_faces; j++) {
+                        scalar_t dist, w1, w2;
+                        GeneralizedTriangleProjection<dim, scalar_t>(
+                                p, &v0[j * dim], &e1[j * dim], &e2[j * dim],
+                                e1_dot_e2[j], e1_norm_sqr[j], e2_norm_sqr[j],
+                                &grad_w1[j * dim], &grad_w2[j * dim], &dist, &w1, &w2);
+                        if (dist < min_dist) {
+                            min_dist = dist; min_idx = j; min_w1 = w1; min_w2 = w2;
+                        }
+                    }
+                    result_dists[i] = min_dist;
+                    result_idxs[i] = static_cast<int>(min_idx);
+                    result_w1[i] = min_w1;
+                    result_w2[i] = min_w2;
+                }
+            }
+
+        template <int dim, typename scalar_t>
+            void GeneralizedTetrahedronProjectionCpu(
+                    const scalar_t* points, size_t num_points, size_t num_tets,
+                    const scalar_t* v0, const scalar_t* e_mat,
+                    const scalar_t* e_dot_mat, const scalar_t* e_dot_inv_mat,
+                    const scalar_t* is_degenerate, scalar_t* result_dists,
+                    int* result_idxs, scalar_t* result_weights) {
+                for (size_t i = 0; i < num_points; i++) {
+                    const scalar_t* p = &points[i * dim];
+                    scalar_t min_dist = FLT_MAX;
+                    size_t min_idx = 0;
+                    scalar_t min_weights[3] = {0, 0, 0};
+                    for (size_t j = 0; j < num_tets; j++) {
+                        scalar_t dist;
+                        scalar_t weights[3];
+                        GeneralizedTetrahedronProjection<dim, scalar_t>(
+                                p, &v0[j * dim], &e_mat[j * 3 * dim],
+                                &e_dot_mat[j * 3 * 3], &e_dot_inv_mat[j * 3 * 3],
+                                is_degenerate[j], &dist, weights);
+                        if (dist < min_dist) {
+                            min_dist = dist; min_idx = j;
+                            copy_vec<3>(min_weights, weights);
+                        }
+                    }
+                    result_dists[i] = min_dist;
+                    result_idxs[i] = static_cast<int>(min_idx);
+                    copy_vec<3>(&result_weights[i * 3], min_weights);
+                }
+            }
     }  // namespace
 
     template <int dim>
         std::vector<torch::Tensor> ComputeGeneralizedTriangleProjection(
                 torch::Tensor points, const TriangularProjectionInfo& info) {
-            CHECK_INPUT(points);
+            CHECK_CONTIGUOUS(points);
 
             TORCH_CHECK(points.size(1) == dim);
             TORCH_CHECK(info.dim == dim);
             TORCH_CHECK(points.dtype() == torch::kFloat32 ||
                     points.dtype() == torch::kFloat64);
             TORCH_CHECK(points.dtype() == info.v0.dtype());
-
-            at::cuda::CUDAGuard device_guard{points.device()};
-            cudaStream_t stream = at::cuda::getCurrentCUDAStream();
 
             int num_points = points.size(0);
             int num_faces = info.num_faces;
@@ -364,6 +425,35 @@ namespace geomlib {
                 torch::zeros({num_points}, points.options()).contiguous();
             torch::Tensor result_w2 =
                 torch::zeros({num_points}, points.options()).contiguous();
+
+            // CPU path (--device cpu): same projection math, host loop.
+            if (!points.is_cuda()) {
+                AT_DISPATCH_FLOATING_TYPES(
+                        points.scalar_type(),
+                        "ComputeGeneralizedTriangleProjectionCpu", [&] {
+                        GeneralizedTriangleProjectionCpu<dim, scalar_t>(
+                                points.contiguous().data_ptr<scalar_t>(),
+                                static_cast<size_t>(num_points),
+                                static_cast<size_t>(num_faces),
+                                info.v0.contiguous().data_ptr<scalar_t>(),
+                                info.e1.contiguous().data_ptr<scalar_t>(),
+                                info.e2.contiguous().data_ptr<scalar_t>(),
+                                info.e1_dot_e2.contiguous().data_ptr<scalar_t>(),
+                                info.e1_norm_sqr.contiguous().data_ptr<scalar_t>(),
+                                info.e2_norm_sqr.contiguous().data_ptr<scalar_t>(),
+                                info.grad_w1.contiguous().data_ptr<scalar_t>(),
+                                info.grad_w2.contiguous().data_ptr<scalar_t>(),
+                                result_dists.data_ptr<scalar_t>(),
+                                result_idxs.data_ptr<int>(),
+                                result_w1.data_ptr<scalar_t>(),
+                                result_w2.data_ptr<scalar_t>());
+                        });
+                return {result_dists, result_idxs.to(torch::kInt64), result_w1,
+                    result_w2};
+            }
+
+            at::cuda::CUDAGuard device_guard{points.device()};
+            cudaStream_t stream = at::cuda::getCurrentCUDAStream();
 
             size_t num_threads = 128;
             dim3 num_blocks(num_points);
@@ -398,9 +488,9 @@ namespace geomlib {
     template <int dim>
         std::vector<torch::Tensor> ComputeGeneralizedTetrahedronProjection(
                 torch::Tensor points, torch::Tensor vertices, torch::Tensor tets) {
-            CHECK_INPUT(points);
-            CHECK_INPUT(vertices);
-            CHECK_INPUT(tets);
+            CHECK_CONTIGUOUS(points);
+            CHECK_CONTIGUOUS(vertices);
+            CHECK_CONTIGUOUS(tets);
 
             TORCH_CHECK(points.size(1) == dim);
             TORCH_CHECK(vertices.size(1) == dim);
@@ -410,10 +500,8 @@ namespace geomlib {
                     torch::kInt64);  // torch requires 64-bit int for indexing
             TORCH_CHECK(points.dtype() == vertices.dtype());
 
-            at::cuda::CUDAGuard device_guard{points.device()};
-            cudaStream_t stream = at::cuda::getCurrentCUDAStream();
-
-            // Pre-compute reusable values.
+            // Pre-compute reusable values (device-agnostic torch ops; run on
+            // whatever device `points` is on, CPU or CUDA).
             using namespace torch::indexing;
             std::vector<torch::Tensor> v_list;
             for (int i = 0; i < 4; i++) {
@@ -449,6 +537,29 @@ namespace geomlib {
                 torch::zeros({static_cast<int>(num_points), 3},
                         points.options())
                 .contiguous();  // w1, w2, w3 of barycentric coordinates
+
+            // CPU path (--device cpu): same projection math, host loop.
+            if (!points.is_cuda()) {
+                AT_DISPATCH_FLOATING_TYPES(
+                        points.scalar_type(),
+                        "ComputeGeneralizedTetrahedronProjectionCpu", [&] {
+                        GeneralizedTetrahedronProjectionCpu<dim, scalar_t>(
+                                points.contiguous().data_ptr<scalar_t>(), num_points,
+                                num_tets, v_list[0].contiguous().data_ptr<scalar_t>(),
+                                e_mat.contiguous().data_ptr<scalar_t>(),
+                                e_dot_mat.contiguous().data_ptr<scalar_t>(),
+                                e_dot_inv_mat.contiguous().data_ptr<scalar_t>(),
+                                is_degenerate.contiguous().data_ptr<scalar_t>(),
+                                result_dists.data_ptr<scalar_t>(),
+                                result_idxs.data_ptr<int>(),
+                                result_weights.data_ptr<scalar_t>());
+                        });
+                return {result_dists, result_idxs.to(torch::kInt64),
+                    result_weights};
+            }
+
+            at::cuda::CUDAGuard device_guard{points.device()};
+            cudaStream_t stream = at::cuda::getCurrentCUDAStream();
 
             size_t num_threads = 128;
             dim3 num_blocks(num_points);
