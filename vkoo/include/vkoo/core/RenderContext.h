@@ -10,6 +10,7 @@ class RenderContext {
  public:
   RenderContext(Device& device, VkSurfaceKHR surface, uint32_t window_width,
                 uint32_t window_height);
+  ~RenderContext();
 
   void Prepare(
       RenderTarget::CreateFunc create_func = RenderTarget::kDefaultCreateFunc);
@@ -45,6 +46,10 @@ class RenderContext {
   uint32_t active_frame_index_;
 
   VkSemaphore acquired_semaphore_;  // TODO: is it right to put this here?
+  // Image acquisition is host-synchronized with this fence.  The original
+  // code recycled a binary acquire semaphore before the previous queue wait
+  // had necessarily completed, which current Vulkan validation layers reject.
+  VkFence acquire_fence_;
 
   RenderTarget::CreateFunc create_render_target_func_{
       RenderTarget::kDefaultCreateFunc};

@@ -12,8 +12,20 @@ RenderContext::RenderContext(Device& device, VkSurfaceKHR surface,
       surface_extent_{window_width, window_height},
       prepared_{false},
       is_frame_active_{false},
-      active_frame_index_{0} {
+      active_frame_index_{0},
+      acquired_semaphore_{VK_NULL_HANDLE},
+      acquire_fence_{VK_NULL_HANDLE} {
   swapchain_ = std::make_unique<Swapchain>(device, surface, surface_extent_);
+
+  VkFenceCreateInfo fence_info{VK_STRUCTURE_TYPE_FENCE_CREATE_INFO};
+  VK_CHECK(vkCreateFence(device_.GetHandle(), &fence_info, nullptr,
+                         &acquire_fence_));
+}
+
+RenderContext::~RenderContext() {
+  if (acquire_fence_ != VK_NULL_HANDLE) {
+    vkDestroyFence(device_.GetHandle(), acquire_fence_, nullptr);
+  }
 }
 
 void RenderContext::Prepare(RenderTarget::CreateFunc create_func) {
@@ -44,26 +56,31 @@ VkSemaphore RenderContext::BeginFrame() {
   HandleWindowResize();
 
   assert(!is_frame_active_);
-  RenderFrame& prev_frame = *frames_.at(active_frame_index_);
-  VkSemaphore acquired_semaphore = prev_frame.RequestSemaphore();
+  // Wait for image acquisition on the host.  This is intentionally simpler
+  // than maintaining a separate frames-in-flight semaphore/fence ring and,
+  // unlike the old pool reuse, is valid even when the GUI renders indefinitely.
+  VK_CHECK(vkResetFences(device_.GetHandle(), 1, &acquire_fence_));
   VkResult acquire_result = swapchain_->AcquireNextImage(
-      active_frame_index_, acquired_semaphore, VK_NULL_HANDLE);
-  if (acquire_result == VK_SUBOPTIMAL_KHR ||
-      acquire_result == VK_ERROR_OUT_OF_DATE_KHR) {
+      active_frame_index_, VK_NULL_HANDLE, acquire_fence_);
+  if (acquire_result == VK_ERROR_OUT_OF_DATE_KHR) {
     HandleWindowResize();
+    VK_CHECK(vkResetFences(device_.GetHandle(), 1, &acquire_fence_));
     acquire_result = swapchain_->AcquireNextImage(
-        active_frame_index_, acquired_semaphore, VK_NULL_HANDLE);
+        active_frame_index_, VK_NULL_HANDLE, acquire_fence_);
   }
 
-  if (acquire_result != VK_SUCCESS) {
+  if (acquire_result != VK_SUCCESS && acquire_result != VK_SUBOPTIMAL_KHR) {
     throw std::runtime_error("Cannot acquire next image from the swapchain.");
   }
+
+  VK_CHECK(vkWaitForFences(device_.GetHandle(), 1, &acquire_fence_, VK_TRUE,
+                           std::numeric_limits<uint64_t>::max()));
 
   is_frame_active_ = true;
 
   // Release resources on the frame that was just acquired.
   GetActiveFrame().Reset();
-  return acquired_semaphore;
+  return VK_NULL_HANDLE;
 }
 
 RenderFrame& RenderContext::GetActiveFrame() {
@@ -102,9 +119,11 @@ VkSemaphore RenderContext::Submit(
   submit_info.commandBufferCount =
       static_cast<uint32_t>(cmd_buf_handles.size());
   submit_info.pCommandBuffers = cmd_buf_handles.data();
-  submit_info.waitSemaphoreCount = 1;
-  submit_info.pWaitSemaphores = &wait_semaphore;
-  submit_info.pWaitDstStageMask = &wait_pipeline_stage;
+  if (wait_semaphore != VK_NULL_HANDLE) {
+    submit_info.waitSemaphoreCount = 1;
+    submit_info.pWaitSemaphores = &wait_semaphore;
+    submit_info.pWaitDstStageMask = &wait_pipeline_stage;
+  }
   submit_info.signalSemaphoreCount = 1;
   submit_info.pSignalSemaphores = &signal_semaphore;
 

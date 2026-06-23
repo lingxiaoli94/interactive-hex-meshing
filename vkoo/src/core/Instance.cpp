@@ -10,8 +10,14 @@ DebugCallback(VkDebugUtilsMessageSeverityFlagBitsEXT message_severity,
               const VkDebugUtilsMessengerCallbackDataEXT* p_callback_data,
               void* pUserData) {
   std::cerr << "Validation layer: " << p_callback_data->pMessage << std::endl;
-  throw std::runtime_error("Ugh!");
-
+  // This runs as a Vulkan loader callback across the C ABI, so throwing a C++
+  // exception out of it is undefined behavior and terminates the process. The
+  // loader legitimately emits benign messages here (e.g. "Removing layer
+  // VK_LAYER_NV_optimus ... because it is a duplicate" when the host
+  // /usr/share/vulkan tree is mounted alongside the image's own copy), and the
+  // original unconditional `throw "Ugh!"` turned every such message into a hard
+  // crash on startup. Log it and return VK_FALSE, which tells Vulkan not to
+  // abort the call that triggered the message.
   return VK_FALSE;
 }
 }  // namespace
