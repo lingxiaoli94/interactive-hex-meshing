@@ -21,6 +21,12 @@ find_package(Vulkan REQUIRED)
 # OpenMP
 find_package(OpenMP REQUIRED)
 
+# CUDA acceleration. Default ON keeps the GPU build byte-for-byte unchanged; OFF
+# links no CUDA at all (no toolkit, no headers, no CUDA-linked objects). The
+# option is exported to C++ as a *numeric* HEX_ENABLE_CUDA=0/1, so every guard
+# must be `#if HEX_ENABLE_CUDA` -- `#ifdef` would be true even when OFF.
+option(HEX_ENABLE_CUDA "Build CUDA acceleration" ON)
+
 if (NOT CMAKE_BUILD_TYPE)
     message(STATUS "No build type selected; default to release.")
     set(CMAKE_BUILD_TYPE "Release")

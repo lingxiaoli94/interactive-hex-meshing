@@ -1,7 +1,9 @@
 #include "PolycubeOptimizer.h"
 
 #include <ATen/Functions.h>
+#if HEX_ENABLE_CUDA
 #include <c10/cuda/CUDACachingAllocator.h>
+#endif
 
 #include "LargestCuboidSolver.h"
 #include "logging.h"
@@ -33,7 +35,10 @@ void PolycubeOptimizer::Optimize(const TetrahedralMesh& mesh,
   OptimizeSteps(num_steps);
   status_ = Status::Completed;
   LOGI("Loss after optimization: {}", ComputeCurrentLoss());
+#if HEX_ENABLE_CUDA
+  // Cache-release hint for the CUDA allocator; nothing to release without it.
   c10::cuda::CUDACachingAllocator::emptyCache();
+#endif
 }
 
 void PolycubeOptimizer::Prepare(const TetrahedralMesh& mesh,

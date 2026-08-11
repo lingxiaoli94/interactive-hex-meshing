@@ -2,9 +2,10 @@
 
 #include <float.h>
 #include <math.h>
-#include <thrust/tuple.h>
 
 #include <cstdio>
+
+#include "cuda_compat.h"
 
 namespace geomlib {
 const auto kEpsilon = 1e-12;
@@ -34,6 +35,11 @@ struct MakeVec3<double> {
   }
 };
 
+// Device-only block reductions. Gated on the build option *and* on nvcc: in a
+// CUDA-enabled build the host compiler also parses this header, and `blockDim` /
+// `__syncthreads()` are non-dependent names it would reject at template
+// definition time even though nothing instantiates them.
+#if HEX_ENABLE_CUDA && defined(__CUDACC__)
 template <typename scalar_t, typename idx_t>
 __device__ void WarpReduceMin(volatile scalar_t* min_vals,
                               volatile idx_t* min_idxs, size_t tid) {
@@ -100,6 +106,7 @@ __device__ void WarpReduceSum(volatile scalar_t* vals, size_t tid) {
   vals[tid] += vals[tid + 2];
   vals[tid] += vals[tid + 1];
 }
+#endif  // HEX_ENABLE_CUDA && defined(__CUDACC__)
 
 template <typename scalar_t>
 __host__ __device__ inline int sign(scalar_t x) {

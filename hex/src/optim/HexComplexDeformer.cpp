@@ -1,7 +1,9 @@
 #include "HexComplexDeformer.h"
 
 #include <ATen/Functions.h>
+#if HEX_ENABLE_CUDA
 #include <c10/cuda/CUDACachingAllocator.h>
+#endif
 #include <geomlib/autograd/GeneralizedProjection.h>
 
 #include "geomlib/TriangularMeshSampler.h"
@@ -126,7 +128,10 @@ void HexComplexDeformer::ResetOptimizer() {
 }
 
 HexComplexDeformer::~HexComplexDeformer() {
+#if HEX_ENABLE_CUDA
+  // Cache-release hint for the CUDA allocator; nothing to release without it.
   c10::cuda::CUDACachingAllocator::emptyCache();
+#endif
 }
 
 torch::Tensor HexComplexDeformer::BuildHexJacobian(

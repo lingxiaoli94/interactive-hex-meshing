@@ -7,11 +7,26 @@
 
 using namespace hex;
 
+namespace {
+// Single source of truth for what this binary was built to do, so the default
+// device, the --device validation and the --help text cannot drift apart.
+#if HEX_ENABLE_CUDA
+constexpr bool kCudaBuild = true;
+#else
+constexpr bool kCudaBuild = false;
+#endif
+constexpr const char* kDefaultDevice = kCudaBuild ? "cuda" : "cpu";
+constexpr const char* kDeviceChoices = kCudaBuild ? "cpu|cuda" : "cpu";
+constexpr const char* kDeviceChoicesProse =
+    kCudaBuild ? "'cpu' or 'cuda'" : "'cpu'";
+}  // namespace
+
 int main(int argc, char** argv) {
   std::string script_path;
   bool exit_after = false;
   bool headless = false;
-  std::string device = "cuda";  // default preserves original behavior
+  // cuda where the build has it; a CUDA-free build can only ever be cpu.
+  std::string device = kDefaultDevice;
   for (int i = 1; i < argc; ++i) {
     std::string a = argv[i];
     if (a == "--script" && i + 1 < argc) {
@@ -24,7 +39,8 @@ int main(int argc, char** argv) {
       device = argv[++i];
     } else if (a == "--help" || a == "-h") {
       std::cout << "Usage: hex [--script <yaml>] [--exit-after] [--headless] "
-                   "[--device cpu|cuda]\n"
+                   "[--device "
+                << kDeviceChoices << "]\n"
                 << "  --script <yaml>   run scripted pipeline from YAML config\n"
                 << "  --exit-after      close the window after the script "
                    "finishes\n"
@@ -32,10 +48,17 @@ int main(int argc, char** argv) {
                    "(no X11);\n"
                 << "                    runs the script and exits. Implies "
                    "--exit-after.\n"
-                << "  --device cpu|cuda compute device for the pipeline math "
-                   "(default cuda).\n"
+                << "  --device " << kDeviceChoices << "\n"
+                << "                    compute device for the pipeline math "
+                   "(default "
+                << kDefaultDevice << ").\n"
                 << "                    cpu runs without an NVIDIA GPU; pair with "
                    "--headless.\n";
+      if (!kCudaBuild) {
+        std::cout << "\nThis binary was built without CUDA "
+                     "(-DHEX_ENABLE_CUDA=OFF): it links no CUDA at\n"
+                     "all and cpu is the only available device.\n";
+      }
       return 0;
     }
   }
@@ -48,10 +71,15 @@ int main(int argc, char** argv) {
 
   if (device == "cpu") {
     hex::SetComputeDevice(torch::Device(torch::kCPU));
-  } else if (device == "cuda") {
+  } else if (device == "cuda" && kCudaBuild) {
     hex::SetComputeDevice(torch::Device(torch::kCUDA));
+  } else if (device == "cuda") {
+    std::cerr << "--device cuda is unavailable: this hex was built without "
+                 "CUDA (-DHEX_ENABLE_CUDA=OFF). Use --device cpu.\n";
+    return 1;
   } else {
-    std::cerr << "--device must be 'cpu' or 'cuda' (got '" << device << "').\n";
+    std::cerr << "--device must be " << kDeviceChoicesProse << " (got '"
+              << device << "').\n";
     return 1;
   }
 

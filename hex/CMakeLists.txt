@@ -20,6 +20,8 @@ set_target_properties(hex PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${PROJECT_SOURCE_
 target_link_libraries(hex vkoo ${TORCH_LIBRARIES} eigen geomlib OpenMP::OpenMP_CXX yaml-cpp::yaml-cpp HDF5::HDF5)
 target_include_directories(hex PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src)
 target_compile_definitions(hex PRIVATE IMPORT_PATH="${PROJECT_SOURCE_DIR}/assets")
+# Numeric on purpose -- see the option() in the top-level CMakeLists.txt.
+target_compile_definitions(hex PRIVATE HEX_ENABLE_CUDA=$<BOOL:${HEX_ENABLE_CUDA}>)
 
 
 if (MSVC)

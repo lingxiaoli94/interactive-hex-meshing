@@ -1,5 +1,7 @@
 #pragma once
 
+#include "cuda_compat.h"
+
 template <int dim, typename scalar_t>
 __host__ __device__ inline void zero_out_vec(scalar_t* x) {
   for (int i = 0; i < dim; i++) {

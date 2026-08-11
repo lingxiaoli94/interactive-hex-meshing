@@ -28,7 +28,11 @@ Instance::Instance(const std::string& application_name,
     : enable_validation_layer_(enable_validation_layer),
       enabled_extensions_(required_extensions) {
   if (enable_validation_layer_ && !CheckValidationLayerSupport()) {
-    throw std::runtime_error("Validation layers requested but not available!");
+    std::cerr << "Warning: Vulkan validation layer " << kValidationLayerName
+              << " was requested but is not available. Continuing without "
+                 "validation layers."
+              << std::endl;
+    enable_validation_layer_ = false;
   }
 
   VkApplicationInfo app_info{};

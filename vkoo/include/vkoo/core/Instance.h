@@ -27,7 +27,7 @@ class Instance {
   bool enable_validation_layer_;
   std::vector<const char*> enabled_extensions_;
   const char* kValidationLayerName = "VK_LAYER_KHRONOS_validation";
-  VkDebugUtilsMessengerEXT debug_messenger_;
+  VkDebugUtilsMessengerEXT debug_messenger_{VK_NULL_HANDLE};
   std::vector<std::unique_ptr<PhysicalDevice>> gpus_;
 };
 }  // namespace vkoo
