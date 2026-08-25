@@ -3,7 +3,9 @@
 #include "PipelineStage.h"
 #include "models/PolycubeGraph.h"
 #include "models/QuadrilateralMesh.h"
+#if HEX_ENABLE_VULKAN
 #include "views/HexCollectionView.h"
+#endif
 
 namespace YAML {
 class Node;
@@ -17,8 +19,13 @@ class DiscretizationStage : public PipelineStage {
   bool CanSwitchTo() override;
   void SwitchTo() override;
   void SwitchFrom() override;
-  bool HandleInputEvent(const vkoo::InputEvent& event) override;
+#if HEX_ENABLE_VULKAN
+  // Defined in the *Gui.cpp translation unit. Declared only in the ON
+  // build: a virtual override must be defined even when never called,
+  // and PipelineStage already supplies a do-nothing base.
   void DrawStageWindow() override;
+  bool HandleInputEvent(const vkoo::InputEvent& event) override;
+#endif
 
   void DiscretizePolycube();
   void FinalizePolycube();
@@ -46,6 +53,10 @@ class DiscretizationStage : public PipelineStage {
   std::unique_ptr<QuadrilateralMesh> current_surface_mesh_;
 
   std::unordered_set<Vector3i, Vector3iHasher> pending_hex_coords_;
+#if HEX_ENABLE_VULKAN
+#if HEX_ENABLE_VULKAN
   std::unique_ptr<HexCollectionView> pending_view_;
+#endif
+#endif
 };
 }  // namespace hex

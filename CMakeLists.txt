@@ -15,8 +15,16 @@ include(${PROJECT_SOURCE_DIR}/CMakeCustomLists.txt OPTIONAL)
 # list(APPEND CMAKE_PREFIX_PATH) "...") to force find_package to locate the correct directory.
 find_package(Torch REQUIRED)
 
+# Renderer. Default ON keeps the GUI build unchanged; OFF compiles and links no
+# Vulkan, imgui, glfw, glslang, SPIRV or spirv-cross at all, and produces a
+# headless-only binary. Exported to C++ as a *numeric* HEX_ENABLE_VULKAN=0/1, so
+# every guard must be `#if HEX_ENABLE_VULKAN` -- `#ifdef` would be true when OFF.
+option(HEX_ENABLE_VULKAN "Build the Vulkan renderer and GUI" ON)
+
 # Vulkan
-find_package(Vulkan REQUIRED)
+if (HEX_ENABLE_VULKAN)
+    find_package(Vulkan REQUIRED)
+endif ()
 
 # OpenMP
 find_package(OpenMP REQUIRED)

@@ -1,18 +1,19 @@
 #include "GlobalController.h"
 
+#include <cassert>
 #include <exception>
 #include <filesystem>
+#include <stdexcept>
 
 #include "logging.h"
 
-// clang-format off
-#include <imgui.h>
-#include "utility/imfilebrowser.h"
-// clang-format on
-
+// The non-visual half of GlobalController. Everything that draws, polls input
+// or touches the application object lives in GlobalControllerGui.cpp, which the
+// HEX_ENABLE_VULKAN=OFF build does not compile. No imgui, no GLFW, no
+// HexMeshingApp below this line.
 #include <vkoo/st/components/Script.h>
 
-#include "HexMeshingApp.h"
+#include "Settings.h"
 #include "serialization/Serializer.h"
 #include "stages/DecompositionStage.h"
 #include "stages/DeformationStage.h"
@@ -25,19 +26,60 @@ namespace fs = std::filesystem;
 
 namespace hex {
 namespace {
-ImGui::FileBrowser gFileBrowser(ImGuiFileBrowserFlags_EnterNewFilename |
-                                ImGuiFileBrowserFlags_CreateNewDir);
-[[maybe_unused]] const int kDeformationStageId = 0;
-[[maybe_unused]] const int kDecompositionStageId = 1;
-[[maybe_unused]] const int kDiscretizationStageId = 2;
 const int kHexahedralizationStageId = 3;
+
+void ValidateStateForStage(const GlobalState& state, int stage_index) {
+  if (state.HasPolycube() != state.HasPolycubeInfo()) {
+    throw std::runtime_error(
+        "stage restart input must contain both polycube and polycube_info, or "
+        "neither");
+  }
+  if (state.HasPolycube() && !state.CheckPolycubeConsistency()) {
+    throw std::runtime_error(
+        "stage restart input has inconsistent polycube and polycube_info");
+  }
+
+  switch (stage_index) {
+    case 0:
+      if (!state.HasTargetVolumeMesh()) {
+        throw std::runtime_error(
+            "deformation requires target_volume_mesh in the input HDF5");
+      }
+      return;
+    case 1:
+      if (!state.HasDeformedVolumeMesh()) {
+        throw std::runtime_error(
+            "decomposition requires deformed_volume_mesh in the input HDF5");
+      }
+      return;
+    case 2:
+      if (!state.HasPolycube()) {
+        throw std::runtime_error(
+            "discretization requires polycube and polycube_info in the input "
+            "HDF5");
+      }
+      return;
+    case 3:
+      if (!state.HasTargetVolumeMesh() ||
+          !state.HasDeformedVolumeMesh() || !state.HasPolycubeComplex()) {
+        throw std::runtime_error(
+            "hexahedralization requires target_volume_mesh, "
+            "deformed_volume_mesh, and polycube_complex in the input HDF5");
+      }
+      return;
+    default:
+      throw std::invalid_argument("stage index must be between 0 and 3");
+  }
+}
 }  // namespace
 
-GlobalController::GlobalController(HexMeshingApp& app, uint32_t window_width,
+GlobalController::GlobalController(Settings& settings, vkoo::Device* device,
+                                   vkoo::st::Scene& scene,
+                                   uint32_t window_width,
                                    uint32_t window_height)
-    : app_{app},
-      device_{app.GetDevice()},
-      scene_{app.GetScene()},
+    : settings_{settings},
+      device_{device},
+      scene_{scene},
       shortcut_controller_{*this},
       window_width_{window_width},
       window_height_{window_height} {
@@ -57,7 +99,9 @@ GlobalController::~GlobalController() {
   hexahedralization_stage_.reset();
 
   // Next destruct global view and state.
+#if HEX_ENABLE_VULKAN
   global_view_.reset();
+#endif
   global_state_.reset();
 }
 
@@ -101,138 +145,43 @@ void GlobalController::ResetHexahedralizationStage() {
 void GlobalController::RebuildViewsAndStages() {
   // This will rebuild all views and controllers given global_state_;
   RebuildStages();
-  global_view_ = std::make_unique<GlobalView>(device_, scene_);
-  global_view_->UpdateAllViews(*global_state_);
+  // Step A4: do not construct what needs a device. With no device there is no
+  // view at all, rather than a view that is present but cannot allocate.
+#if HEX_ENABLE_VULKAN
+  if (device_ != nullptr) {
+    global_view_ = std::make_unique<GlobalView>(*device_, scene_);
+    global_view_->UpdateAllViews(*global_state_);
+    global_view_->ApplyVisibility(visibility_mask_);
+  }
+#else
+  assert(device_ == nullptr);  // no renderer in this build, so never a device
+#endif
   model_name_.clear();
   project_name_.clear();
 }
 
-void GlobalController::DrawMainMenuBar() {
-  static std::string file_op;
-  if (ImGui::BeginMainMenuBar()) {
-    if (ImGui::BeginMenu("File")) {
-      if (ImGui::MenuItem("New")) {
-        global_state_ = std::make_unique<GlobalState>();
-        RebuildViewsAndStages();
-      }
-      if (ImGui::MenuItem("Open")) {
-        if (!last_visited_path_.empty()) {
-          gFileBrowser.SetPwd(last_visited_path_);
-        } else {
-          gFileBrowser.SetPwd(PathManager::GetWorkspacePath());
-        }
-        gFileBrowser.Open();
-        file_op = "open";
-      }
-      if (ImGui::MenuItem("Save")) {
-        if (!last_visited_path_.empty()) {
-          gFileBrowser.SetPwd(last_visited_path_);
-        } else {
-          gFileBrowser.SetPwd(PathManager::GetWorkspacePath());
-        }
-        gFileBrowser.Open();
-        if (!project_name_.empty()) {
-          gFileBrowser.SetInputBuf(project_name_);
-        } else if (!model_name_.empty()) {
-          gFileBrowser.SetInputBuf(model_name_);
-        }
-        file_op = "save";
-      }
-      ImGui::Separator();
-      if (ImGui::MenuItem("Import")) {
-        gFileBrowser.SetPwd(PathManager::GetImportPath());
-        gFileBrowser.Open();
-        file_op = "import";
-      }
-      if (ImGui::MenuItem("Export", nullptr, false,
-                          global_state_->HasResultMesh())) {
-        gFileBrowser.SetPwd(PathManager::GetWorkspacePath());
-        gFileBrowser.Open();
-        if (!model_name_.empty()) {
-          gFileBrowser.SetInputBuf(model_name_ + ".mesh");
-        }
-        file_op = "export";
-      }
+vkoo::Device& GlobalController::GetDevice() {
+  // Vulkan-only method: reaching it without a device means a call site was
+  // misclassified, not that no-Vulkan mode is unsupported.
+  assert(device_ != nullptr);
+  return *device_;
+}
 
-      if (IsExpertMode()) {
-        if (ImGui::MenuItem("Import Hex Mesh")) {
-          if (!last_visited_path_.empty()) {
-            gFileBrowser.SetPwd(last_visited_path_);
-          } else {
-            gFileBrowser.SetPwd(PathManager::GetWorkspacePath());
-          }
-          gFileBrowser.Open();
-          file_op = "import_hex";
-        }
-      }
-
-      ImGui::EndMenu();
-    }
-    if (ImGui::BeginMenu("Options")) {
-      DrawRenderingOptions();
-      ImGui::Separator();
-      ImGui::Checkbox("Expert Mode", &app_.GetSettings().expert_mode);
-      if (ImGui::MenuItem("Load Settings")) {
-        if (!last_visited_path_.empty()) {
-          gFileBrowser.SetPwd(last_visited_path_);
-        } else {
-          gFileBrowser.SetPwd(PathManager::GetWorkspacePath());
-        }
-        gFileBrowser.Open();
-        file_op = "load_settings";
-      }
-      if (ImGui::MenuItem("Save Settings")) {
-        if (!last_visited_path_.empty()) {
-          gFileBrowser.SetPwd(last_visited_path_);
-        } else {
-          gFileBrowser.SetPwd(PathManager::GetWorkspacePath());
-        }
-        gFileBrowser.Open();
-        file_op = "save_settings";
-      }
-      ImGui::EndMenu();
-    }
-    ImGui::EndMainMenuBar();
+void GlobalController::SetVisibility(unsigned long flags) {
+  visibility_mask_ = flags;
+#if HEX_ENABLE_VULKAN
+  if (global_view_ != nullptr) {
+    global_view_->ApplyVisibility(visibility_mask_);
   }
+#endif
+}
 
-  gFileBrowser.Display();
-  if (!file_op.empty() && gFileBrowser.HasSelected()) {
-    auto selected_file = gFileBrowser.GetSelected().string();
-#ifdef NDEBUG
-    try {
-#endif
-      if (file_op == "open") {
-        global_state_ = GlobalState::LoadFromFile(selected_file);
-        RebuildViewsAndStages();
-        project_name_ = fs::path(selected_file).filename().string();
-        last_visited_path_ = fs::path(selected_file).parent_path();
-      } else if (file_op == "save") {
-        global_state_->SaveToFile(selected_file);
-        last_visited_path_ = fs::path(selected_file).parent_path();
-      } else if (file_op == "import") {
-        global_state_ = std::make_unique<GlobalState>();
-        RebuildViewsAndStages();
-        LoadTargetMesh(selected_file);
-        model_name_ = fs::path(selected_file).stem().string();
-      } else if (file_op == "import_hex") {
-        LoadResultMesh(selected_file);
-      } else if (file_op == "export") {
-        ExportTargetComplex(selected_file);
-      } else if (file_op == "load_settings") {
-        app_.ReloadSettings(selected_file);
-      } else if (file_op == "save_settings") {
-        app_.SaveSettings(selected_file);
-      } else {
-        LOGW("Unknown file op: {}", file_op);
-      }
-#ifdef NDEBUG
-    } catch (...) {
-      LOGW("Unknown exception thrown during I/O!");
-    }
-#endif
-    gFileBrowser.ClearSelected();
-    file_op = "";
-  }
+void GlobalController::AddVisibility(unsigned long flags) {
+  SetVisibility(visibility_mask_ | flags);
+}
+
+void GlobalController::RemoveVisibility(unsigned long flags) {
+  SetVisibility(visibility_mask_ & ~flags);
 }
 
 void GlobalController::SwitchStage(int new_stage_idx) {
@@ -247,69 +196,6 @@ void GlobalController::SwitchStage(PipelineStage& stage) {
   auto it = std::find(stages_.begin(), stages_.end(), &stage);
   if (it != stages_.end()) {
     SwitchStage(std::distance(stages_.begin(), it));
-  }
-}
-
-void GlobalController::DrawNavigationWindow() {
-  ImGui::SetNextWindowPos(ImVec2(0, 100), ImGuiCond_Once);
-  ImGui::SetNextWindowSize(ImVec2(200, 500), ImGuiCond_Once);
-
-  ImGui::Begin("Navigation");
-
-  ImGui::SetNextTreeNodeOpen(true, ImGuiCond_Once);
-  if (ImGui::TreeNode("Stages")) {
-    int tmp_stage_idx = current_stage_idx_;
-    for (int i = 0; i < static_cast<int>(stages_.size()); i++) {
-      if (ImGui::RadioButton(stages_[i]->GetName().c_str(), &tmp_stage_idx,
-                             i)) {
-        SwitchStage(tmp_stage_idx);
-        break;
-      }
-    }
-    ImGui::TreePop();
-    ImGui::Spacing();
-  }
-
-  ImGui::SetNextTreeNodeOpen(true, ImGuiCond_Once);
-  if (ImGui::TreeNode("Visibility")) {
-    global_view_->DrawNodeVisibilityGui(IsKeyPressed(GLFW_KEY_LEFT_SHIFT));
-    ImGui::TreePop();
-    ImGui::Spacing();
-  }
-
-  ImGui::End();
-}
-
-void GlobalController::DrawGui() {
-  if (app_.GetSettings().show_demo) {
-    ImGui::ShowDemoWindow();
-  }
-  // return;
-
-  DrawMainMenuBar();
-  DrawNavigationWindow();
-  DrawStageWindow();
-  if (app_.GetSettings().show_advanced) {
-    DrawAdvancedWindow();
-  }
-}
-
-void GlobalController::DrawAdvancedWindow() {
-  ImGui::Begin("Advanced");
-  ImGui::Text("%.1f FPS", ImGui::GetIO().Framerate);
-
-  ImGui::SetNextItemWidth(120);
-  ImGui::InputInt("FPS limit", &app_.GetSettings().fps_limit);
-  ImGui::End();
-}
-
-void GlobalController::DrawStageWindow() {
-  if (current_stage_idx_ != -1) {
-    ImGui::SetNextWindowPos(ImVec2(window_width_, 100), ImGuiCond_Once,
-                            ImVec2(1.0f, 0.0f));
-
-    ImGui::SetNextWindowSize(ImVec2(400, 600), ImGuiCond_Once);
-    stages_[current_stage_idx_]->DrawStageWindow();
   }
 }
 
@@ -345,8 +231,12 @@ void GlobalController::LoadTargetMesh(const std::string& file_path) {
   }
 
   global_state_->SetTargetVolumeMesh(std::move(tet_mesh));
-  global_view_->UpdateInputMeshView(*global_state_);
-  global_view_->SetVisibility(GlobalView::VisibilityInputMesh);
+#if HEX_ENABLE_VULKAN
+  if (global_view_ != nullptr) {
+    global_view_->UpdateInputMeshView(*global_state_);
+  }
+#endif
+  SetVisibility(VisibilityInputMesh);
 }
 
 void GlobalController::LoadResultMesh(const std::string& file_path) {
@@ -358,11 +248,29 @@ void GlobalController::LoadResultMesh(const std::string& file_path) {
   auto hex_mesh = std::make_unique<HexahedralMesh>(file_path);
 
   global_state_->SetResultMesh(std::move(hex_mesh));
-  global_view_->UpdateFilteredHexView(*global_state_, FilteringSetting{});
+#if HEX_ENABLE_VULKAN
+  if (global_view_ != nullptr) {
+    global_view_->UpdateFilteredHexView(*global_state_, FilteringSetting{});
+  }
+#endif
 }
 
 void GlobalController::OpenProject(const std::string& file_path) {
   global_state_ = GlobalState::LoadFromFile(file_path);
+  RebuildViewsAndStages();
+  project_name_ = fs::path(file_path).filename().string();
+  last_visited_path_ = fs::path(file_path).parent_path();
+}
+
+void GlobalController::OpenProjectForStage(const std::string& file_path,
+                                           int stage_index) {
+  auto restart_state = Serializer::LoadStateForStage(file_path, stage_index);
+  ValidateStateForStage(*restart_state, stage_index);
+
+  // Assign only after loading and validation succeed. This leaves the current
+  // project intact on failure and, critically, rebuilds controllers/views only
+  // from the already-filtered state.
+  global_state_ = std::move(restart_state);
   RebuildViewsAndStages();
   project_name_ = fs::path(file_path).filename().string();
   last_visited_path_ = fs::path(file_path).parent_path();
@@ -381,7 +289,7 @@ void GlobalController::ExportTargetComplex(const std::string& selected_file) {
 
   std::function<Vector3f(Vector3f)> vertex_map = [](Vector3f v) { return v; };
 
-  if (not app_.GetSettings().export_unit_scale &&
+  if (not settings_.export_unit_scale &&
       global_state_->HasFloat("input_scale") &&
       global_state_->HasMatrixXf("input_center")) {
     float input_scale = global_state_->GetFloat("input_scale");
@@ -395,47 +303,19 @@ void GlobalController::ExportTargetComplex(const std::string& selected_file) {
                           vertex_map);
 }
 
-bool GlobalController::HandleInputEvent(const vkoo::InputEvent& event) {
-  // Handle a couple of backdoor shortcuts.
-  if (event.GetSource() == vkoo::EventSource::Keyboard) {
-    auto& key_event = static_cast<const vkoo::KeyInputEvent&>(event);
-    if (key_event.GetAction() == vkoo::KeyAction::Down) {
-      auto code = key_event.GetCode();
-      if (code == GLFW_KEY_F12) {
-        app_.GetSettings().show_advanced ^= 1;
-      } else if (code == GLFW_KEY_F11) {
-        app_.GetSettings().show_demo ^= 1;
-      } else if (code == GLFW_KEY_F10) {
-        app_.SaveScreenshot("screenshot.png");
-      } else if (code == GLFW_KEY_F9) {
-        app_.GetSettings().show_gui ^= 1;
-      }
-    }
-  }
-  if (current_stage_idx_ == -1 ||
-      !stages_[current_stage_idx_]->HandleInputEvent(event)) {
-    bool handled = arc_ball_camera_script_->HandleInputEvent(event);
-    if (handled) {
-      UpdateCameraSettings();
-    }
-    return handled;
-  }
-  return false;
-}
-
 void GlobalController::UpdateCameraSettings() {
-  auto& spec = app_.GetSettings().camera;
+  auto& spec = settings_.camera;
   spec.position = arc_ball_camera_script_->GetPosition();
   spec.anchor = arc_ball_camera_script_->GetAnchor();
   spec.up_direction = arc_ball_camera_script_->GetUpDirection();
 }
 
 bool GlobalController::IsExpertMode() const {
-  return app_.GetSettings().expert_mode;
+  return settings_.expert_mode;
 }
 
 void GlobalController::InitArcBallCamera() {
-  auto& camera_spec = app_.GetSettings().camera;
+  auto& camera_spec = settings_.camera;
   arc_ball_camera_script_ = std::make_unique<vkoo::st::ArcBallCameraScript>(
       *scene_.GetActiveCameraPtr(), camera_spec.position, camera_spec.anchor,
       camera_spec.up_direction, true);
@@ -455,8 +335,6 @@ void GlobalController::Update(float delta_time) {
 }
 
 GlobalState& GlobalController::GetGlobalState() { return *global_state_; }
-
-GlobalView& GlobalController::GetGlobalView() { return *global_view_; }
 
 Ray GlobalController::ShootRayAtMousePosition(float x_pos, float y_pos) {
   // Make (0, 0) the bottom left.
@@ -480,36 +358,5 @@ glm::mat4 GlobalController::GetWorldToScreenMatrix() const {
   return camera.GetProjectionMatrix() * camera.GetViewMatrix();
 }
 
-bool GlobalController::IsKeyPressed(int keycode) {
-  return app_.IsKeyPressed(keycode);
-}
-
-void GlobalController::GetMousePosition(float& x_pos, float& y_pos) {
-  app_.GetMousePosition(x_pos, y_pos);
-}
-
-void GlobalController::DrawRenderingOptions() {
-  {
-    // People have different convention than mine, so invert this.
-    ImGui::Checkbox("Reverse Camera",
-                    &arc_ball_camera_script_->GetReversedRef());
-  }
-  auto& settings = app_.GetSettings();
-
-  bool need_update = false;
-  if (ImGui::Checkbox("MSAA", &settings.msaa_on)) {
-    need_update = true;
-  }
-  if (ImGui::Checkbox("SSAO", &settings.ssao_on)) {
-    need_update = true;
-  }
-  if (ImGui::Checkbox("Export unit scale", &settings.export_unit_scale)) {
-    need_update = true;
-  }
-
-  if (need_update) {
-    app_.UpdatePipelines();
-  }
-}
 
 }  // namespace hex

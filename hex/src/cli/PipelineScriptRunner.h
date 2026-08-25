@@ -3,17 +3,19 @@
 #include <string>
 
 namespace hex {
-class HexMeshingApp;
+class GlobalController;
 
 // Reads a YAML pipeline-automation script, runs the requested stages by
 // dispatching to the existing stage controllers, and writes per-stage HDF5
 // snapshots and an optional final .mesh export to the run directory.
 //
-// This is *scripted GUI automation*, not a headless CLI: the host application
-// (Vulkan + window) must already be initialized before LoadAndRun is called.
+// Takes the GlobalController directly. It used to take HexMeshingApp& purely to
+// call GetGlobalController() on it, which made the script runner -- the one
+// component that is pure automation -- depend on the Vulkan application type
+// and prevented a HEX_ENABLE_VULKAN=OFF build from containing it at all.
 class PipelineScriptRunner {
  public:
-  explicit PipelineScriptRunner(HexMeshingApp& app);
+  explicit PipelineScriptRunner(GlobalController& global_controller);
 
   // Returns true on success, false on any error (logged + printed to stderr).
   bool LoadAndRun(const std::string& yaml_path);
@@ -23,7 +25,7 @@ class PipelineScriptRunner {
   bool RequestedExit() const { return requested_exit_; }
 
  private:
-  HexMeshingApp& app_;
+  GlobalController& gc_;
   bool requested_exit_{false};
 };
 }  // namespace hex

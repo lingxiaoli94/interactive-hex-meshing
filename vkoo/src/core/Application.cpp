@@ -1,5 +1,7 @@
 #include "vkoo/core/Application.h"
 
+#include <cassert>
+
 #include "vkoo/core/Gui.h"
 #include "vkoo/logging.h"
 #include "vkoo/st/components/Script.h"
@@ -61,21 +63,32 @@ void Application::ChangeWindowSize(uint32_t new_width, uint32_t new_height) {
   glfwSetWindowSize(window_, new_width, new_height);
 }
 
-void Application::Prepare(bool headless) {
-  headless_ = headless;
+void Application::Prepare(DisplayMode mode) {
+  display_mode_ = mode;
 
   // The GLFW window is the only true X11/display dependency. In headless mode
   // it (and the surface/swapchain built from it) is skipped entirely.
-  if (!headless_) {
+  if (ModeHasWindow(display_mode_)) {
     PrepareWindow();
-  } else {
+  } else if (display_mode_ == DisplayMode::HeadlessVulkan) {
     LOGI(
         "vkoo: headless mode - skipping window, surface and swapchain "
         "(surfaceless Vulkan).");
   }
 
+  if (!ModeHasGraphicsDevice(display_mode_)) {
+    // Close the tap. No Instance, no GetSuitableGPU(), no Device, no
+    // RenderContext -- so not one Vulkan entry point is called and no ICD,
+    // driver or validation layer needs to be present. instance_, device_,
+    // surface_ and render_context_ all stay null by construction.
+    LOGI(
+        "vkoo: no-Vulkan mode - skipping instance, physical device, logical "
+        "device and render context; no Vulkan call will be made.");
+    return;
+  }
+
   std::vector<const char*> instance_extensions;
-  if (!headless_) {
+  if (!IsHeadless()) {
     // Surface extensions are only needed when we have a window to present to.
     uint32_t glfw_extension_count = 0;
     const char** glfw_extensions =
@@ -90,7 +103,7 @@ void Application::Prepare(bool headless) {
   instance_ = std::make_unique<Instance>(name_, instance_extensions,
                                          enable_validation_layer_);
 
-  if (!headless_) {
+  if (!IsHeadless()) {
     CreateSurface();
   }
 
@@ -104,16 +117,21 @@ void Application::Prepare(bool headless) {
       VK_KHR_DEPTH_STENCIL_RESOLVE_EXTENSION_NAME,
       VK_KHR_CREATE_RENDERPASS_2_EXTENSION_NAME,
       VK_KHR_MAINTENANCE2_EXTENSION_NAME, VK_KHR_MULTIVIEW_EXTENSION_NAME};
-  if (!headless_) {
+  if (!IsHeadless()) {
     device_extensions.push_back(VK_KHR_SWAPCHAIN_EXTENSION_NAME);
   }
   device_ = std::make_unique<Device>(gpu, surface_, device_extensions);
 
-  if (!headless_) {
+  if (!IsHeadless()) {
     render_context_ = std::make_unique<RenderContext>(
         *device_, surface_, starter_width_, starter_height_);
     PrepareRenderContext();
   }
+}
+
+bool Application::HasAnyVulkanObject() const {
+  return instance_ != nullptr || device_ != nullptr ||
+         surface_ != VK_NULL_HANDLE || render_context_ != nullptr;
 }
 
 void Application::PrepareRenderContext() { render_context_->Prepare(); }
@@ -164,6 +182,11 @@ void Application::SetViewPortAndScissor(CommandBuffer& command_buffer,
 }
 
 Application::~Application() {
+  // Invariant: a surface can only have been created from an instance. The two
+  // independent null checks below are correct only while that holds, so state
+  // it rather than relying on them happening to line up.
+  assert(surface_ == VK_NULL_HANDLE || instance_ != nullptr);
+
   if (device_) {
     device_->WaitIdle();
   }

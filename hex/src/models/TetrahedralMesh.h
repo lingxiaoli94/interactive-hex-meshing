@@ -7,6 +7,10 @@
 
 #include "TriangularMesh.h"
 
+#if HEX_ENABLE_VULKAN
+#include <vkoo/core/VertexObject.h>
+#endif
+
 namespace hex {
 class TetrahedralMesh {
  public:
@@ -43,8 +47,12 @@ class TetrahedralMesh {
   void InvalidateCache();
   torch::Tensor ComputeDistanceFieldGPU(torch::Tensor points) const;
 
+#if HEX_ENABLE_VULKAN
+  // The only Vulkan in models/. Its sole caller is GlobalView::UpdateAnchorsView,
+  // which the OFF build does not compile.
   std::vector<std::shared_ptr<vkoo::VertexObject>> CreateAnchorVBOs(
       vkoo::Device& device) const;
+#endif
 
  private:
   std::shared_ptr<geomlib::TetMesh> tet_mesh_;

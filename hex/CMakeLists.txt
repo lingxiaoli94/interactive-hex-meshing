@@ -12,6 +12,24 @@ file(GLOB hex_srcs
         ${CMAKE_CURRENT_SOURCE_DIR}/src/serialization/*.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/src/utility/*.cpp)
 
+if (NOT HEX_ENABLE_VULKAN)
+    # Remove the renderer from the target rather than #if-ing out whole files:
+    # every view, the cuboid editor, the ImGui helpers, the Vulkan application
+    # and each stage's GUI translation unit. Phase A proved every one of these
+    # is unreachable on the script path, which is what makes the removal safe
+    # rather than hopeful.
+    #
+    # The *Gui.cpp files additionally carry their own `#if HEX_ENABLE_VULKAN`,
+    # so a future glob change cannot quietly pull them back in.
+    list(FILTER hex_srcs EXCLUDE REGEX "/src/views/")
+    list(FILTER hex_srcs EXCLUDE REGEX "/src/controllers/CuboidEditingController\\.cpp$")
+    list(FILTER hex_srcs EXCLUDE REGEX "/src/utility/ImGuiEx\\.cpp$")
+    list(FILTER hex_srcs EXCLUDE REGEX "/src/HexMeshingApp\\.cpp$")
+    list(FILTER hex_srcs EXCLUDE REGEX "Gui\\.cpp$")
+    # ShortcutController is NOT excluded: GlobalController holds one by value,
+    # so its constructor must exist. Only its ImGui menu is #if'd out.
+endif ()
+
 add_executable(hex ${hex_srcs})
 target_compile_options(hex PRIVATE ${cxx_warning_flags})
 set_target_properties(hex PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${PROJECT_SOURCE_DIR}/bin/$<CONFIG>")

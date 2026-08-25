@@ -1,6 +1,10 @@
 #include "ShortcutController.h"
 
+// GlobalController holds one of these by value, so the constructor must
+// exist in every variant. The debug menu is the only ImGui here.
+#if HEX_ENABLE_VULKAN
 #include <imgui.h>
+#endif
 
 #include <random>
 
@@ -10,6 +14,7 @@
 #include "utility/StopWatch.h"
 
 namespace hex {
+#if HEX_ENABLE_VULKAN
 namespace {
 void TestLargestCuboid() {
   /* int occ_raw[] = {1, 0, 1, 0, 0, 1, 0, 1, 1, 1, 1, 1, 1, 1, 1, 1, 0, 0, 1,
@@ -52,11 +57,15 @@ void TestLargestCuboid() {
   */
 }
 }  // namespace
+#endif  // HEX_ENABLE_VULKAN
+
 ShortcutController::ShortcutController(GlobalController& global_controller) {}
 
+#if HEX_ENABLE_VULKAN
 void ShortcutController::DrawMenu() {
   if (ImGui::MenuItem("Test Largest Cuboid")) {
     TestLargestCuboid();
   }
 }
+#endif  // HEX_ENABLE_VULKAN
 }  // namespace hex

@@ -3,7 +3,6 @@
 #include "common.h"
 
 #include <geomlib/TriMesh.h>
-#include <vkoo/core/VertexObject.h>
 
 #include "Ray.h"
 

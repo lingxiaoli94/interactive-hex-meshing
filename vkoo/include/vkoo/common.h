@@ -14,7 +14,6 @@
 #include <glm/gtx/hash.hpp>
 #include <glm/gtx/matrix_decompose.hpp>
 #include <glm/gtx/norm.hpp>
-#include <vulkan/vulkan.h>
 
 #include <algorithm>
 #include <array>
@@ -33,7 +32,23 @@
 #include <typeindex>
 #include <vector>
 
+// Everything Vulkan lives behind this guard. The scene graph (st/) includes this
+// header seven times over and is otherwise entirely Vulkan-free, so this one
+// guard is what lets HEX_ENABLE_VULKAN=OFF compile the scene graph at all.
+//
+// Guarded in place rather than split into a separate vk_common.h: seven st/
+// headers and ~45 core/ files include this file, a split would touch every one
+// of them, and the ON build's preprocessor output must stay identical
+// (Verification H). HEX_ENABLE_VULKAN is therefore PUBLIC on the vkoo target --
+// unlike HEX_ENABLE_CUDA, which is private to hex.
+//
+// Numeric on purpose: `#ifdef` would be true even when the option is OFF.
+#if HEX_ENABLE_VULKAN
+#include <vulkan/vulkan.h>
+#endif
+
 namespace vkoo {
+#if HEX_ENABLE_VULKAN
 std::string GetErrorString(VkResult error_code);
 
 #define VK_CHECK(f)                                                            \
@@ -55,22 +70,10 @@ VkFormat GetSuitableDepthFormat(
         VK_FORMAT_D24_UNORM_S8_UINT, VK_FORMAT_D16_UNORM_S8_UINT,
         VK_FORMAT_D16_UNORM});
 
-const float kPi = std::atan(1.0f) * 4;
-
-template <class T>
-using BindingMap = std::map<uint32_t, std::map<uint32_t, T>>;
-
 struct LoadStoreInfo {
   VkAttachmentLoadOp load_op = VK_ATTACHMENT_LOAD_OP_CLEAR;
   VkAttachmentStoreOp store_op = VK_ATTACHMENT_STORE_OP_STORE;
 };
-
-template <typename T>
-inline std::vector<uint8_t> to_bytes(const T& value) {
-  return std::vector<uint8_t>{
-      reinterpret_cast<const uint8_t*>(&value),
-      reinterpret_cast<const uint8_t*>(&value) + sizeof(T)};
-}
 
 struct ImageMemoryBarrier {
   VkPipelineStageFlags src_stage_mask{VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT};
@@ -80,6 +83,19 @@ struct ImageMemoryBarrier {
   VkImageLayout old_layout{VK_IMAGE_LAYOUT_UNDEFINED};
   VkImageLayout new_layout{VK_IMAGE_LAYOUT_UNDEFINED};
 };
+#endif  // HEX_ENABLE_VULKAN
+
+const float kPi = std::atan(1.0f) * 4;
+
+template <class T>
+using BindingMap = std::map<uint32_t, std::map<uint32_t, T>>;
+
+template <typename T>
+inline std::vector<uint8_t> to_bytes(const T& value) {
+  return std::vector<uint8_t>{
+      reinterpret_cast<const uint8_t*>(&value),
+      reinterpret_cast<const uint8_t*>(&value) + sizeof(T)};
+}
 
 template <class T>
 inline void hash_combine(size_t& seed, const T& v) {

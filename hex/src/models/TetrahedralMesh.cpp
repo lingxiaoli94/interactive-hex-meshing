@@ -4,7 +4,6 @@
 #include <geomlib/autograd/GeneralizedProjection.h>
 #include <geomlib/io/TetMeshParser.h>
 #include <geomlib/point_tet_mesh_test.h>
-#include <vkoo/core/VertexObject.h>
 
 #include <random>
 
@@ -191,6 +190,7 @@ const TriangularMesh& TetrahedralMesh::GetSurfaceMesh() const {
   return *surface_mesh_;
 }
 
+#if HEX_ENABLE_VULKAN
 std::vector<std::shared_ptr<vkoo::VertexObject>>
 TetrahedralMesh::CreateAnchorVBOs(vkoo::Device& device) const {
   // Return two vbos, one for anchors inside the mesh and one for outside
@@ -218,6 +218,7 @@ TetrahedralMesh::CreateAnchorVBOs(vkoo::Device& device) const {
   }
   return vbos;
 }
+#endif  // HEX_ENABLE_VULKAN
 
 }  // namespace hex
 

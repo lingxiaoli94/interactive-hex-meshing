@@ -1,12 +1,9 @@
-# GLFW
-option(GLFW_BUILD_DOCS OFF)
-option(GLFW_BUILD_TESTS OFF)
-option(GLFW_BUILD_EXAMPLES OFF)
-option(GLFW_BUILD_TESTS OFF)
-option(GLFW_INSTALL OFF)
-
-add_subdirectory(glfw)
-
+# Renderer-only third parties. With HEX_ENABLE_VULKAN=OFF none of glfw, glslang,
+# SPIRV, spirv-cross, stb or imgui is referenced by any target, so they are not
+# configured at all -- rather than configured and then left unbuilt. Verification
+# I checks the result is absent from the link interface either way; skipping the
+# subdirectories also keeps the OFF configure fast and its dependency tree
+# honest. glm, eigen, spdlog and yaml-cpp are needed by both variants.
 # glm
 add_library(glm INTERFACE)
 set(GLM_DIR ${CMAKE_CURRENT_SOURCE_DIR}/glm)
@@ -22,6 +19,17 @@ target_compile_definitions(glm INTERFACE
 # eigen
 add_library(eigen INTERFACE)
 target_include_directories(eigen SYSTEM INTERFACE ${CMAKE_CURRENT_SOURCE_DIR}/eigen)
+
+if (HEX_ENABLE_VULKAN)
+
+# GLFW
+option(GLFW_BUILD_DOCS OFF)
+option(GLFW_BUILD_TESTS OFF)
+option(GLFW_BUILD_EXAMPLES OFF)
+option(GLFW_BUILD_TESTS OFF)
+option(GLFW_INSTALL OFF)
+
+add_subdirectory(glfw)
 
 # glslang
 option(ENABLE_SPVREMAPPER OFF)
@@ -76,6 +84,8 @@ set(IMGUI_FILES
 add_library(imgui STATIC ${IMGUI_FILES})
 
 target_include_directories(imgui PUBLIC ${IMGUI_DIR})
+
+endif ()  # HEX_ENABLE_VULKAN
 
 # spdlog
 add_subdirectory(spdlog)

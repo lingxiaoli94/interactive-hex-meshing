@@ -1,4 +1,8 @@
+#include <algorithm>
 #include <fstream>
+#include <limits>
+#include <optional>
+#include <stdexcept>
 
 #include "H5Cpp.h"
 #include "Serializer.h"
@@ -95,19 +99,44 @@ void CreateFixedLengthStringArrayDataset(H5::Group& group,
   dataset.write(char_buf_2d.data(), PredType::NATIVE_CHAR);
 }
 
-std::vector<std::string> LoadFixedLengthStringArrayDataset(
+std::vector<std::string> LoadPolycubeNamesFromDataset(
     const DataSet& dataset) {
   DataSpace space = dataset.getSpace();
+  const int rank = space.getSimpleExtentNdims();
+  if (rank != 2) {
+    throw std::runtime_error(
+        "polycube_info/names must be a rank-2 [N, 32] byte array");
+  }
+
   hsize_t dims[2];
   space.getSimpleExtentDims(dims);
+  if (dims[1] != static_cast<hsize_t>(kMaxNameLength)) {
+    throw std::runtime_error(fmt::format(
+        "polycube_info/names must have shape [N, {}], got [N, {}]",
+        kMaxNameLength, dims[1]));
+  }
+  if (dims[0] > std::numeric_limits<size_t>::max() /
+                    static_cast<size_t>(dims[1])) {
+    throw std::runtime_error("polycube_info/names is too large to load");
+  }
 
-  std::vector<char> array(dims[0] * dims[1]);
-  dataset.read(array.data(), PredType::NATIVE_CHAR);
+  const size_t row_count = static_cast<size_t>(dims[0]);
+  const size_t row_width = static_cast<size_t>(dims[1]);
+  std::vector<char> array(row_count * row_width);
+  if (!array.empty()) {
+    dataset.read(array.data(), PredType::NATIVE_CHAR);
+  }
 
   std::vector<std::string> result;
-  for (int i = 0; i < dims[0]; i++) {
-    // Assuming the char arrays are null-terminated.
-    result.push_back(array.data() + i * dims[1]);
+  result.reserve(row_count);
+  for (size_t i = 0; i < row_count; i++) {
+    const char* row_begin = array.data() + i * row_width;
+    const char* row_end = row_begin + row_width;
+    const char* terminator = std::find(row_begin, row_end, '\0');
+    // A full-width 32-character name has no room for a NUL in the on-disk
+    // format. Treat the row boundary as its terminator instead of scanning
+    // into the next row (or beyond the allocation).
+    result.emplace_back(row_begin, terminator);
   }
 
   return result;
@@ -157,14 +186,14 @@ void CreateTetrahedralMeshGroup(H5::Group& group, const TetrahedralMesh& mesh) {
 }
 
 std::unique_ptr<TetrahedralMesh> LoadTetrahedralMeshFromGroup(
-    const H5::Group& group) {
+    const H5::Group& group, bool load_generated_fields = true) {
   auto vertices = LoadMatrixXfFromDataset(group.openDataSet("vertices"));
   auto tets = LoadMatrixXiFromDataset(group.openDataSet("tets"));
   auto mesh = std::make_unique<TetrahedralMesh>(vertices, tets);
-  if (group.nameExists("anchors")) {
+  if (load_generated_fields && group.nameExists("anchors")) {
     mesh->SetAnchors(LoadMatrixXfFromDataset(group.openDataSet("anchors")));
   }
-  if (group.nameExists("sdf")) {
+  if (load_generated_fields && group.nameExists("sdf")) {
     mesh->SetDistanceField(LoadMatrixXfFromDataset(group.openDataSet("sdf")));
   }
 
@@ -214,11 +243,13 @@ std::unique_ptr<PolycubeInfo> LoadPolycubeInfoFromGroup(
       LoadArrayIntFromDataset(group.openDataSet("ordering"));
   polycube_info->locked = LoadArrayIntFromDataset(group.openDataSet("locked"));
   std::vector<std::string> names =
-      LoadFixedLengthStringArrayDataset(group.openDataSet("names"));
+      LoadPolycubeNamesFromDataset(group.openDataSet("names"));
   for (auto& name : names) {
-    FixedLengthStr str;
+    if (name.size() > static_cast<size_t>(kMaxNameLength)) {
+      throw std::runtime_error("polycube_info name exceeds 32 bytes");
+    }
+    FixedLengthStr str{};
     std::memcpy(str.buf, name.data(), name.size() * sizeof(char));
-    assert(name.size() <= kMaxNameLength);
     str.buf[name.size()] = '\0';
     polycube_info->names.push_back(str);
   }
@@ -247,6 +278,95 @@ std::unique_ptr<HexComplex> LoadHexComplexFromGroup(const H5::Group& group) {
   return std::make_unique<HexComplex>(MatrixXfToArrayVector3f(vertices),
                                       MatrixXiToArrayVector4i(quads), patches,
                                       hexes);
+}
+
+std::unique_ptr<GlobalState> LoadStateImpl(
+    const std::string& file_path,
+    const std::optional<int>& requested_stage_index) {
+  H5File file(file_path, H5F_ACC_RDONLY);
+
+  // A stage restart keeps outputs produced strictly before the requested
+  // stage. A normal GUI load has no boundary and therefore loads everything.
+  const auto include_output_from_stage =
+      [&requested_stage_index](int producer_stage_index) {
+        return !requested_stage_index.has_value() ||
+               producer_stage_index < requested_stage_index.value();
+      };
+
+  std::unique_ptr<GlobalState> state = std::make_unique<GlobalState>();
+
+  // The target mesh and normalization attributes are source/provenance state,
+  // not output of a pipeline stage, so every restart retains them when present.
+  if (file.nameExists("/target_volume_mesh")) {
+    // anchors/sdf are only pipeline-generated for the deformed mesh. Preserve
+    // them on a normal GUI load for backward compatibility, but do not carry
+    // unexpected derived fields on the target mesh into a fresh stage run.
+    const bool load_target_generated_fields =
+        !requested_stage_index.has_value();
+    state->SetTargetVolumeMesh(LoadTetrahedralMeshFromGroup(
+        file.openGroup("/target_volume_mesh"),
+        load_target_generated_fields));
+  }
+  if (include_output_from_stage(0) &&
+      file.nameExists("/deformed_volume_mesh")) {
+    // anchors/sdf are generated by decomposition (stage 1), even though they
+    // are nested inside the stage-0 deformed mesh group. A fresh decomposition
+    // restart must therefore load only deformed vertices/tets.
+    const bool load_decomposition_fields = include_output_from_stage(1);
+    state->SetDeformedVolumeMesh(LoadTetrahedralMeshFromGroup(
+        file.openGroup("/deformed_volume_mesh"),
+        load_decomposition_fields));
+  }
+  if (include_output_from_stage(1) && file.nameExists("/polycube")) {
+    state->SetPolycube(LoadPolycubeFromGroup(file.openGroup("/polycube")));
+  }
+  if (include_output_from_stage(1) && file.nameExists("/polycube_info")) {
+    state->SetPolycubeInfo(
+        LoadPolycubeInfoFromGroup(file.openGroup("/polycube_info")));
+  }
+  if (include_output_from_stage(2) &&
+      file.nameExists("/polycube_complex")) {
+    state->SetPolycubeComplex(
+        LoadHexComplexFromGroup(file.openGroup("/polycube_complex")));
+  }
+  if (include_output_from_stage(3) && file.nameExists("/target_complex")) {
+    state->SetTargetComplex(
+        LoadHexComplexFromGroup(file.openGroup("/target_complex")));
+  }
+  if (include_output_from_stage(3) && file.nameExists("/result_mesh")) {
+    state->SetResultMesh(
+        LoadHexahedralMeshFromGroup(file.openGroup("/result_mesh")));
+  }
+
+  // Load attributes independently of the stage boundary. They are needed to
+  // transform a final mesh back to the input scale and position.
+  for (auto& key : kFloatKeys) {
+    if (file.attrExists(key)) {
+      auto att = file.openAttribute(key);
+      float f;
+      att.read(PredType::NATIVE_FLOAT, &f);
+      state->SetFloat(key, f);
+      LOGI("Load float {}: {}", key, f);
+    }
+  }
+
+  for (auto& key : kMatrixXfKeys) {
+    if (file.attrExists(key)) {
+      auto att = file.openAttribute(key);
+
+      DataSpace space = att.getSpace();
+      hsize_t dims[2];
+      space.getSimpleExtentDims(dims);
+
+      Eigen::MatrixXf matrix{dims[1], dims[0]};
+      att.read(PredType::NATIVE_FLOAT, matrix.data());
+      state->SetMatrixXf(key, matrix);
+
+      LOGI("Load matrix {}: ({}, {}, {})", key, matrix(0), matrix(1),
+           matrix(2));
+    }
+  }
+  return state;
 }
 }  // namespace
 
@@ -305,66 +425,15 @@ void Serializer::SaveState(const GlobalState& state,
 
 std::unique_ptr<GlobalState> Serializer::LoadState(
     const std::string& file_path) {
-  H5File file(file_path, H5F_ACC_RDONLY);
+  return LoadStateImpl(file_path, std::nullopt);
+}
 
-  std::unique_ptr<GlobalState> state = std::make_unique<GlobalState>();
-
-  if (file.nameExists("/target_volume_mesh")) {
-    state->SetTargetVolumeMesh(
-        LoadTetrahedralMeshFromGroup(file.openGroup("/target_volume_mesh")));
+std::unique_ptr<GlobalState> Serializer::LoadStateForStage(
+    const std::string& file_path, int stage_index) {
+  if (stage_index < 0 || stage_index > 3) {
+    throw std::invalid_argument("stage index must be between 0 and 3");
   }
-  if (file.nameExists("/deformed_volume_mesh")) {
-    state->SetDeformedVolumeMesh(
-        LoadTetrahedralMeshFromGroup(file.openGroup("/deformed_volume_mesh")));
-  }
-  if (file.nameExists("/polycube")) {
-    state->SetPolycube(LoadPolycubeFromGroup(file.openGroup("/polycube")));
-  }
-  if (file.nameExists("/polycube_info")) {
-    state->SetPolycubeInfo(
-        LoadPolycubeInfoFromGroup(file.openGroup("/polycube_info")));
-  }
-  if (file.nameExists("/polycube_complex")) {
-    state->SetPolycubeComplex(
-        LoadHexComplexFromGroup(file.openGroup("/polycube_complex")));
-  }
-  if (file.nameExists("/target_complex")) {
-    state->SetTargetComplex(
-        LoadHexComplexFromGroup(file.openGroup("/target_complex")));
-  }
-  if (file.nameExists("/result_mesh")) {
-    state->SetResultMesh(
-        LoadHexahedralMeshFromGroup(file.openGroup("/result_mesh")));
-  }
-
-  // Load attributes.
-  for (auto& key : kFloatKeys) {
-    if (file.attrExists(key)) {
-      auto att = file.openAttribute(key);
-      float f;
-      att.read(PredType::NATIVE_FLOAT, &f);
-      state->SetFloat(key, f);
-      LOGI("Load float {}: {}", key, f);
-    }
-  }
-
-  for (auto& key : kMatrixXfKeys) {
-    if (file.attrExists(key)) {
-      auto att = file.openAttribute(key);
-
-      DataSpace space = att.getSpace();
-      hsize_t dims[2];
-      space.getSimpleExtentDims(dims);
-
-      Eigen::MatrixXf matrix{dims[1], dims[0]};
-      att.read(PredType::NATIVE_FLOAT, matrix.data());
-      state->SetMatrixXf(key, matrix);
-
-      LOGI("Load matrix {}: ({}, {}, {})", key, matrix(0), matrix(1),
-           matrix(2));
-    }
-  }
-  return state;
+  return LoadStateImpl(file_path, stage_index);
 }
 
 Eigen::MatrixXf Serializer::LoadSingleMatrixXf(const std::string& file_path,

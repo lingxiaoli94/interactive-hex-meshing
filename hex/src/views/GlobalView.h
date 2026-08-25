@@ -10,25 +10,20 @@
 #include "QuadSurfaceView.h"
 #include "TriSurfaceView.h"
 #include "models/GlobalState.h"
+#include "models/Visibility.h"
 
 namespace hex {
 class GlobalView {
  public:
-  enum VisibilityFlag : unsigned long {
-    VisibilityNone = 0x00,
-    VisibilityInputMesh = 0x01,
-    VisibilityDeformedMesh = 0x02,
-    VisibilityDecomposition = 0x04,
-    VisibilityPolycubeComplex = 0x08,
-    VisibilityResultFilteredMesh = 0x20,
-    VisibilityAnchors = 0x40,
-  };
   GlobalView(vkoo::Device& device, vkoo::st::Scene& scene);
   GlobalView(const GlobalView&) = delete;
   ~GlobalView();
   GlobalView& operator=(const GlobalView&) = delete;
 
-  void DrawNodeVisibilityGui(bool ctrl_pressed);
+  // Returns true when the user changed the mask, which the caller then applies.
+  // The mask is passed in rather than owned here: it is non-visual state and
+  // lives in GlobalController, so it survives with no renderer present.
+  bool DrawNodeVisibilityGui(bool ctrl_pressed, unsigned long& mask);
   void UpdateAllViews(GlobalState& global_state);
   void UpdateInputMeshView(GlobalState& global_state);
   void UpdateDeformedMeshView(GlobalState& global_state);
@@ -42,17 +37,15 @@ class GlobalView {
   void ChangeTriMeshAppearance(VisibilityFlag flag, bool transparent,
                                bool wireframe);
 
-  void SetVisibility(unsigned long flags);
-  void AddVisibility(unsigned long flags);
-  void RemoveVisibility(unsigned long flags);
-  unsigned long GetVisibility();
+  // Shows exactly the nodes whose flag is set in `mask` (and that exist).
+  // GlobalController is the owner of `mask` and the only caller.
+  void ApplyVisibility(unsigned long mask);
   PolycubeView& GetPolycubeView();
 
  private:
   struct VisibilityInfo {
     VisibilityFlag flag;
     vkoo::st::Node*& node;
-    bool& visibility;
     bool transparent{false};  // only used by input/deformed meshes
     bool wireframe{true};     // only used by input/deformed meshes
   };
@@ -60,8 +53,6 @@ class GlobalView {
   void CreateDefaultMaterials();
   void SetMeshOptions();
   void RegisterVisibilityInfos();
-  void UpdateVisibility();
-  void ClearVisibility();
   VisibilityInfo& GetVisibilityInfo(VisibilityFlag flag);
   void UpdateMeshViewByInfo(const VisibilityInfo& info);
 
@@ -78,15 +69,6 @@ class GlobalView {
   vkoo::st::Node* polycube_node_{nullptr};
   vkoo::st::Node* polycube_complex_node_{nullptr};
   vkoo::st::Node* result_filtered_mesh_node_{nullptr};
-
-  struct {
-    bool input_mesh{false};
-    bool deformed_mesh{false};
-    bool anchors{false};
-    bool decomposition{false};
-    bool polycube_complex{false};
-    bool result_filtered_mesh{false};
-  } visibility_;
 
   std::vector<VisibilityInfo> visibility_infos_;
 
