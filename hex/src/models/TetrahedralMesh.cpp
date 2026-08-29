@@ -4,7 +4,6 @@
 #include <geomlib/autograd/GeneralizedProjection.h>
 #include <geomlib/io/TetMeshParser.h>
 #include <geomlib/point_tet_mesh_test.h>
-#include <vkoo/core/VertexObject.h>
 
 #include <random>
 
@@ -89,7 +88,7 @@ void TetrahedralMesh::CreateAnchors(int grid_size, bool inside_only,
 
   if (inside_only) {
     using namespace torch::indexing;
-    auto uniform_anchors_gpu = MatrixXfToTensor(uniform_anchors).cuda();
+    auto uniform_anchors_gpu = MatrixXfToTensor(uniform_anchors).to(hex::ComputeDevice());
     auto uniform_sdf_gpu = ComputeDistanceFieldGPU(uniform_anchors_gpu);
     uniform_anchors = TensorToMatrixXf(
         uniform_anchors_gpu.index({uniform_sdf_gpu < 0, Slice()})
@@ -103,9 +102,9 @@ void TetrahedralMesh::CreateAnchors(int grid_size, bool inside_only,
   //                                3};
   Eigen::MatrixXf surface_anchors;
   {
-    auto vertices = MatrixXfToTensor(GetSurfaceMesh().GetVertices()).cuda();
+    auto vertices = MatrixXfToTensor(GetSurfaceMesh().GetVertices()).to(hex::ComputeDevice());
     auto faces =
-        MatrixXiToTensor(GetSurfaceMesh().GetFaces()).cuda().to(torch::kInt64);
+        MatrixXiToTensor(GetSurfaceMesh().GetFaces()).to(hex::ComputeDevice()).to(torch::kInt64);
     geomlib::TriangularMeshSampler sampler{vertices, faces};
     auto samples = sampler.Sample(surface_samples);
     surface_anchors = TensorToMatrixXf(samples.detach().cpu());
@@ -126,7 +125,7 @@ void TetrahedralMesh::CreateAnchors(int grid_size, bool inside_only,
 }
 
 void TetrahedralMesh::CreateDistanceField() const {
-  auto anchors_gpu = MatrixXfToTensor(GetAnchors()).cuda();
+  auto anchors_gpu = MatrixXfToTensor(GetAnchors()).to(hex::ComputeDevice());
   auto result_gpu = ComputeDistanceFieldGPU(anchors_gpu);
 
   distance_field_ = std::make_unique<Eigen::VectorXf>(
@@ -136,13 +135,14 @@ void TetrahedralMesh::CreateDistanceField() const {
 torch::Tensor TetrahedralMesh::ComputeDistanceFieldGPU(
     torch::Tensor points) const {
   points = points.contiguous();
-  assert(points.is_cuda());
+  // points live on hex::ComputeDevice() (CUDA by default, CPU with --device cpu);
+  // the geomlib kernels below dispatch on the tensor's device.
   auto& surface_mesh = GetSurfaceMesh();
 
   auto surface_vertices_gpu =
-      MatrixXfToTensor(surface_mesh.GetVertices()).cuda().contiguous();
+      MatrixXfToTensor(surface_mesh.GetVertices()).to(hex::ComputeDevice()).contiguous();
   auto surface_faces_gpu =
-      MatrixXiToTensor(surface_mesh.GetFaces()).cuda().contiguous();
+      MatrixXiToTensor(surface_mesh.GetFaces()).to(hex::ComputeDevice()).contiguous();
 
   auto proj_info = geomlib::TriangularProjectionInfo(surface_vertices_gpu,
                                                      surface_faces_gpu);
@@ -153,8 +153,8 @@ torch::Tensor TetrahedralMesh::ComputeDistanceFieldGPU(
       proj_result[0].to(torch::kFloat32).sqrt();  // GeneralizedTriangleProjection
                                                   // returns squared distance.
   // At this point udf is unsigned.
-  auto vertices_gpu = MatrixXfToTensor(GetVertices()).cuda().contiguous();
-  auto tets_gpu = MatrixXiToTensor(GetTets()).cuda().contiguous();
+  auto vertices_gpu = MatrixXfToTensor(GetVertices()).to(hex::ComputeDevice()).contiguous();
+  auto tets_gpu = MatrixXiToTensor(GetTets()).to(hex::ComputeDevice()).contiguous();
   auto test_result = geomlib::PointTetMeshTest(points, vertices_gpu, tets_gpu)
                          .to(torch::kFloat32);
   return udf * test_result;
@@ -190,6 +190,7 @@ const TriangularMesh& TetrahedralMesh::GetSurfaceMesh() const {
   return *surface_mesh_;
 }
 
+#if HEX_ENABLE_VULKAN
 std::vector<std::shared_ptr<vkoo::VertexObject>>
 TetrahedralMesh::CreateAnchorVBOs(vkoo::Device& device) const {
   // Return two vbos, one for anchors inside the mesh and one for outside
@@ -217,6 +218,7 @@ TetrahedralMesh::CreateAnchorVBOs(vkoo::Device& device) const {
   }
   return vbos;
 }
+#endif  // HEX_ENABLE_VULKAN
 
 }  // namespace hex
 

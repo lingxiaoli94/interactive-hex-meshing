@@ -1,7 +1,9 @@
 #include "PolycubeOptimizer.h"
 
 #include <ATen/Functions.h>
+#if HEX_ENABLE_CUDA
 #include <c10/cuda/CUDACachingAllocator.h>
+#endif
 
 #include "LargestCuboidSolver.h"
 #include "logging.h"
@@ -20,7 +22,7 @@ const float kSubtractExtra = 0.005f;
 }  // namespace
 
 PolycubeOptimizer::PolycubeOptimizer(Options options)
-    : options_{options}, device_{torch::kCUDA}, status_{Status::Idle} {}
+    : options_{options}, device_{hex::ComputeDevice()}, status_{Status::Idle} {}
 
 void PolycubeOptimizer::Optimize(const TetrahedralMesh& mesh,
                                  const Polycube& polycube, size_t num_steps,
@@ -33,7 +35,10 @@ void PolycubeOptimizer::Optimize(const TetrahedralMesh& mesh,
   OptimizeSteps(num_steps);
   status_ = Status::Completed;
   LOGI("Loss after optimization: {}", ComputeCurrentLoss());
+#if HEX_ENABLE_CUDA
+  // Cache-release hint for the CUDA allocator; nothing to release without it.
   c10::cuda::CUDACachingAllocator::emptyCache();
+#endif
 }
 
 void PolycubeOptimizer::Prepare(const TetrahedralMesh& mesh,
@@ -235,7 +240,7 @@ std::tuple<torch::Tensor, Vector3f> PolycubeOptimizer::CreateAmbientGrid(
           .cpu());
   auto grids = torch::meshgrid(steps);
 
-  return {torch::stack(grids, -1).to(torch::kFloat32).cuda(),
+  return {torch::stack(grids, -1).to(torch::kFloat32).to(hex::ComputeDevice()),
           delta};  // DxDxDx3
 }
 

@@ -2,7 +2,6 @@
 
 #include "common.h"
 
-#include <vkoo/core/VertexObject.h>
 
 #include "Ray.h"
 

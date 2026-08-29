@@ -16,6 +16,7 @@
 #include <vkoo/st/scripts/ArcBallCameraScript.h>
 #include <vkoo/utils.h>
 
+#include <cassert>
 #include <chrono>
 
 #include "logging.h"
@@ -35,17 +36,39 @@ HexMeshingApp::~HexMeshingApp() {
   // device_->WaitIdle();
 }
 
-void HexMeshingApp::Prepare() {
-  Application::Prepare();
+void HexMeshingApp::Prepare(vkoo::DisplayMode mode) {
+  Application::Prepare(mode);
 
   // Initialize HexConvention early to prevent race conditions caused by lazy
   // intialization.
   HexConvention::Initialize();
 
-  CreateSampler();  // this also creates sampler
+  // The sampler is a Vulkan object and used to sit outside the headless guard,
+  // so it was created even when nothing could ever sample from it.
+  if (HasGraphicsDevice()) {
+    CreateSampler();
+  }
+  // The scene graph itself is Vulkan-free. SetupScene builds the controller,
+  // which builds views only when a device exists.
   SetupScene();
-  SetupRenderPipelines();  // this should happen after samplers are created
-  gui_ = std::make_unique<vkoo::Gui>(*this, 20.0f);
+
+  // Render pipelines and the GUI exist only to draw to the swapchain, which is
+  // never created headless. Skip them; the script path reaches no draw/GUI code
+  // (MainLoop is never entered headless).
+  if (mode == vkoo::DisplayMode::Gui) {
+    SetupRenderPipelines();  // this should happen after samplers are created
+    gui_ = std::make_unique<vkoo::Gui>(*this, 20.0f);
+  } else if (mode == vkoo::DisplayMode::HeadlessVulkan) {
+    LOGI("Headless mode: skipped render pipelines and GUI.");
+  } else {
+    // Verification C: report the seam rather than inferring it from the
+    // environment, and log it unconditionally so a release run proves it too.
+    assert(!HasAnyVulkanObject());
+    LOGI(
+        "No-Vulkan mode: skipped sampler, render pipelines, GUI and every "
+        "view; vulkan_objects_created={}",
+        HasAnyVulkanObject());
+  }
 }
 
 void HexMeshingApp::MainLoop() {
@@ -106,8 +129,12 @@ void HexMeshingApp::SetupScene() {
   uint32_t window_width;
   uint32_t window_height;
   GetWindowSize(window_width, window_height);
-  global_controller_ =
-      std::make_unique<GlobalController>(*this, window_width, window_height);
+  // Constructor data, not `*this`: GlobalController no longer knows the
+  // application type. The GUI back-reference is attached separately, and only
+  // its GUI translation unit ever uses it.
+  global_controller_ = std::make_unique<GlobalController>(
+      settings_, GetDevicePtr(), GetScene(), window_width, window_height);
+  global_controller_->SetGuiHost(*this);
 }
 
 void HexMeshingApp::RecreateLights() {

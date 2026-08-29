@@ -12,18 +12,18 @@
 
 namespace hex {
 namespace {
-std::string FlagToName(GlobalView::VisibilityFlag flag) {
-  if (flag == GlobalView::VisibilityInputMesh) {
+std::string FlagToName(VisibilityFlag flag) {
+  if (flag == VisibilityInputMesh) {
     return "Input mesh";
-  } else if (flag == GlobalView::VisibilityDeformedMesh) {
+  } else if (flag == VisibilityDeformedMesh) {
     return "Deformed mesh";
-  } else if (flag == GlobalView::VisibilityDecomposition) {
+  } else if (flag == VisibilityDecomposition) {
     return "Cuboid decomposition";
-  } else if (flag == GlobalView::VisibilityPolycubeComplex) {
+  } else if (flag == VisibilityPolycubeComplex) {
     return "Polycube quad surface";
-  } else if (flag == GlobalView::VisibilityResultFilteredMesh) {
+  } else if (flag == VisibilityResultFilteredMesh) {
     return "Result mesh (filtered)";
-  } else if (flag == GlobalView::VisibilityAnchors) {
+  } else if (flag == VisibilityAnchors) {
     return "Anchors";
   }
 
@@ -73,33 +73,26 @@ void GlobalView::SetMeshOptions() {
 }
 
 void GlobalView::RegisterVisibilityInfos() {
+  visibility_infos_.push_back({VisibilityInputMesh, input_mesh_node_});
+  visibility_infos_.push_back({VisibilityDeformedMesh, deformed_mesh_node_});
+  visibility_infos_.push_back({VisibilityDecomposition, polycube_node_});
   visibility_infos_.push_back(
-      {VisibilityInputMesh, input_mesh_node_, visibility_.input_mesh});
+      {VisibilityPolycubeComplex, polycube_complex_node_});
   visibility_infos_.push_back(
-      {VisibilityDeformedMesh, deformed_mesh_node_, visibility_.deformed_mesh});
-  visibility_infos_.push_back(
-      {VisibilityDecomposition, polycube_node_, visibility_.decomposition});
-  visibility_infos_.push_back({VisibilityPolycubeComplex,
-                               polycube_complex_node_,
-                               visibility_.polycube_complex});
-  visibility_infos_.push_back({VisibilityResultFilteredMesh,
-                               result_filtered_mesh_node_,
-                               visibility_.result_filtered_mesh});
-  visibility_infos_.push_back(
-      {VisibilityAnchors, anchors_node_, visibility_.anchors});
+      {VisibilityResultFilteredMesh, result_filtered_mesh_node_});
+  visibility_infos_.push_back({VisibilityAnchors, anchors_node_});
 }
 
 void GlobalView::UpdateAllViews(GlobalState& global_state) {
-  unsigned long visibility_mask = GetVisibility();
-
+  // Rebuilding the views replaces every node, so the caller re-applies the
+  // visibility mask afterwards. This function no longer save/restores it: the
+  // mask lives in GlobalController now and is not this object's to remember.
   UpdateInputMeshView(global_state);
   UpdateDeformedMeshView(global_state);
   UpdateAnchorsView(global_state);
   UpdatePolycubeView(global_state);
   UpdatePolycubeComplexView(global_state);
   UpdateFilteredHexView(global_state, FilteringSetting());
-
-  SetVisibility(visibility_mask);
 }
 
 void GlobalView::UpdateInputMeshView(GlobalState& global_state) {
@@ -228,16 +221,17 @@ void GlobalView::CleanupPolycubeComplexView() {
   }
 }
 
-void GlobalView::DrawNodeVisibilityGui(bool shift_pressed) {
+bool GlobalView::DrawNodeVisibilityGui(bool shift_pressed, unsigned long& mask) {
   bool changed = false;
   for (int i = 0; i < (int)visibility_infos_.size(); i++) {
     auto& info = visibility_infos_[i];
     if (info.node != nullptr) {
-      if (ImGui::Selectable(FlagToName(info.flag).c_str(), info.visibility)) {
+      if (ImGui::Selectable(FlagToName(info.flag).c_str(),
+                            (mask & info.flag) != 0)) {
         if (!shift_pressed) {
-          ClearVisibility();
+          mask = VisibilityNone;
         }
-        info.visibility ^= 1;
+        mask ^= info.flag;
         changed = true;
       }
       if (info.flag == VisibilityFlag::VisibilityInputMesh ||
@@ -267,51 +261,13 @@ void GlobalView::DrawNodeVisibilityGui(bool shift_pressed) {
     }
   }
 
-  if (changed) {
-    UpdateVisibility();
-  }
+  return changed;
 }
 
-void GlobalView::UpdateVisibility() {
+void GlobalView::ApplyVisibility(unsigned long mask) {
   for (auto& info : visibility_infos_) {
     if (info.node != nullptr) {
-      info.node->SetVisible(info.visibility);
-    }
-  }
-}
-
-void GlobalView::SetVisibility(unsigned long flags) {
-  ClearVisibility();
-  for (auto& info : visibility_infos_) {
-    if (info.node != nullptr && (info.flag & flags)) {
-      info.visibility = true;
-    }
-  }
-  UpdateVisibility();
-}
-
-void GlobalView::AddVisibility(unsigned long flags) {
-  SetVisibility(GetVisibility() | flags);
-}
-
-void GlobalView::RemoveVisibility(unsigned long flags) {
-  SetVisibility(GetVisibility() & ~flags);
-}
-
-unsigned long GlobalView::GetVisibility() {
-  unsigned long mask = 0;
-  for (auto& info : visibility_infos_) {
-    if (info.node != nullptr && info.visibility) {
-      mask |= info.flag;
-    }
-  }
-  return mask;
-}
-
-void GlobalView::ClearVisibility() {
-  for (auto& info : visibility_infos_) {
-    if (info.node != nullptr) {
-      info.visibility = false;
+      info.node->SetVisible((info.flag & mask) != 0);
     }
   }
 }
@@ -388,6 +344,11 @@ void GlobalView::UpdateMeshViewByInfo(const VisibilityInfo& info) {
   } else {
     assert(info.flag == VisibilityFlag::VisibilityDeformedMesh);
     view = deformed_mesh_view_.get();
+  }
+  if (view == nullptr) {
+    // The mesh this info describes has not been loaded yet, so there is no
+    // appearance to change. Previously this dereferenced null.
+    return;
   }
   view->SetWireframeVisible(info.wireframe);
   view->SetTransparency(info.transparent);

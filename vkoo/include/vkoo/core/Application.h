@@ -4,6 +4,7 @@
 #include <GLFW/glfw3.h>
 
 #include "Device.h"
+#include "DisplayMode.h"
 #include "InputEvent.h"
 #include "Instance.h"
 #include "PhysicalDevice.h"
@@ -19,7 +20,9 @@ class Application {
   Application(bool enable_validation_layer);
   virtual ~Application();
 
-  virtual void Prepare();
+  // Creates as much of the renderer as `mode` allows; see DisplayMode.h.
+  // Default (Gui) is the unchanged interactive path.
+  virtual void Prepare(DisplayMode mode = DisplayMode::Gui);
   virtual void Update(float delta_time);
   virtual void Draw(CommandBuffer& command_buffer, RenderTarget& render_target);
   virtual void DrawRenderPasses(CommandBuffer& command_buffer,
@@ -35,8 +38,23 @@ class Application {
 
   bool IsKeyPressed(int key);
   void GetMousePosition(float& x_pos, float& y_pos);
+  // Asserts a device exists. In HeadlessNoVulkan mode there is none -- ask
+  // HasGraphicsDevice() first, or use GetDevicePtr().
   Device& GetDevice();
   st::Scene& GetScene();
+
+  DisplayMode GetDisplayMode() const { return display_mode_; }
+  // False only in HeadlessNoVulkan mode. Everything that allocates against a
+  // Vulkan device (views, samplers, vertex objects) must check this.
+  bool HasGraphicsDevice() const { return device_ != nullptr; }
+  // Nullable counterpart of GetDevice(). Named GetDevicePtr rather than
+  // overloading GetDevice(), which cannot differ by return type alone.
+  Device* GetDevicePtr() { return device_.get(); }
+
+  // True if any of instance_, device_, surface_ or render_context_ exists.
+  // Must be false after Prepare(HeadlessNoVulkan). This direct postcondition
+  // is more precise than inferring "no Vulkan" from the container environment.
+  bool HasAnyVulkanObject() const;
 
  protected:
   virtual void PrepareRenderContext();
@@ -60,7 +78,12 @@ class Application {
   std::unique_ptr<st::Scene> scene_;
 
   std::unique_ptr<Gui> gui_;
-  GLFWwindow* window_;
+  GLFWwindow* window_{nullptr};
+
+  // Set by Prepare(). Anything below Gui skipped the window/surface/swapchain;
+  // HeadlessNoVulkan additionally skipped the instance and device.
+  DisplayMode display_mode_{DisplayMode::Gui};
+  bool IsHeadless() const { return display_mode_ != DisplayMode::Gui; }
 
   uint32_t starter_width_{1280};
   uint32_t starter_height_{720};
@@ -75,6 +98,6 @@ class Application {
   void ScrollCallback(double x_offset, double y_offset);
 
   bool enable_validation_layer_;
-  VkSurfaceKHR surface_;
+  VkSurfaceKHR surface_{VK_NULL_HANDLE};
 };
 }  // namespace vkoo

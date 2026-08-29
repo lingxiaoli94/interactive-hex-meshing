@@ -17,9 +17,10 @@ class HexMeshingApp : public vkoo::Application {
  public:
   HexMeshingApp(bool enable_validation_layer);
   ~HexMeshingApp();
-  void Prepare() override;
+  void Prepare(vkoo::DisplayMode mode = vkoo::DisplayMode::Gui) override;
   void DrawGui() override;
   Settings& GetSettings();
+  GlobalController& GetGlobalController() { return *global_controller_; }
   void UpdatePipelines();
   void MainLoop() override;
 

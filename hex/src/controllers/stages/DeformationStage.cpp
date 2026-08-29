@@ -1,121 +1,16 @@
-#include <imgui.h>
+#include <yaml-cpp/yaml.h>
+
+#include <stdexcept>
 
 #include "DeformationStage.h"
 #include "controllers/GlobalController.h"
 #include "logging.h"
-#include "utility/ImGuiEx.h"
+#include "models/GlobalState.h"
 
 namespace hex {
 DeformationStage::DeformationStage(GlobalController& global_controller)
     : PipelineStage(global_controller) {}
 
-void DeformationStage::DrawStageWindow() {
-  ImGui::SetNextWindowSize(ImVec2(400, 360), ImGuiCond_Once);
-  ImGui::Begin("Deformation");
-  bool pressed;
-
-  ImGui::PushItemWidth(50);
-  pressed = ImGui::Button("Init/Reset deformed mesh");
-  ImGui::SameLine();
-  ImGuiHelpMarker(
-      "Initialize or reset the deformed mesh to be the same as the input "
-      "mesh. This must be pressed first after loading a tetrahedral mesh.");
-  if (pressed) {
-    InitDeformedMesh();
-  }
-  ImGui::PopItemWidth();
-
-  DrawDistortionEnergyChildWindow(distortion_options_, false, false);
-
-  ImGuiTreeNodeWithTooltip(
-      "L1 energy parameters", ImGuiTreeNodeFlags_DefaultOpen,
-      "These parameters control how close the deformed shape resemble an "
-      "axis-aligned polycube.",
-      [&] {
-        ImGui::SetNextItemWidth(80);
-        {
-          ImGuiFrameColorGuard frame_cg{5.0f / 7.0f};
-          ImGui::DragFloat("cubeness", &deformer_options_.cubeness_weight,
-                           1e-2f, 0.0f, 100.0f, "%.2f");
-        }
-        ImGui::SameLine();
-        ImGuiHelpMarker(
-            "This measures how much we want each face normal to be "
-            "axis-aligned.");
-        ImGui::SameLine();
-        ImGui::SetNextItemWidth(80);
-        {
-          ImGuiFrameColorGuard frame_cg{6.0f / 7.0f};
-          ImGui::DragFloat("smoothness", &deformer_options_.smoothness_weight,
-                           1e-3f, 0.0f, 1.0f, "%.3f");
-          ImGui::SameLine();
-          ImGuiHelpMarker(
-              "This measures how well smooth normals on neighboring faces need "
-              "to "
-              "be.");
-        }
-
-        if (global_controller_.IsExpertMode()) {
-          ImGui::SetNextItemWidth(120);
-
-          static bool is_logarithm = true;
-          {
-            ImGuiFrameColorGuard frame_cg{0.0f / 7.0f};
-            ImGui::DragFloat("eps", &deformer_options_.norm_eps, 3e-4f, 1e-6f,
-                             1.0f, "%.6f",
-                             is_logarithm ? ImGuiSliderFlags_Logarithmic
-                                          : ImGuiSliderFlags_None);
-          }
-          ImGui::SameLine();
-          ImGuiHelpMarker(
-              "This is the regularization constant used to give a smoothed "
-              "version of l1 loss. ");
-
-          ImGui::SameLine();
-          ImGui::Checkbox("log-scale", &is_logarithm);
-          ImGui::SameLine();
-          ImGuiHelpMarker(
-              "Determines Whether dragging eps will change its value in log "
-              "scale "
-              "(recommended) "
-              "or not.");
-        }
-      });
-
-  DrawOptimizerOptionsNode(deformer_options_.learning_rate,
-                           deformer_options_.adam_betas, nullptr);
-
-  pressed = ImGui::Button("Init/Reset optimizer");
-  ImGui::SameLine();
-  ImGuiHelpMarker(
-      "Create a new deformation optimizer based on the current set of "
-      "parameters. If an optimizer has been created already, it will be "
-      "overriden and all previous optimizer state (e.g. momentum of gradients) "
-      "will be lost, which may or may not be the desired outcome.");
-  if (pressed) {
-    PrepareVolumetricDeformation();
-  }
-
-  if (cubic_volumetric_deformer_) {
-    pressed = ImGui::Button("Reoptimize");
-    ImGui::SameLine();
-    ImGuiHelpMarker(
-        "Reoptimize for a given number of steps. This will block the program "
-        "until finish.");
-    ImGui::SameLine();
-    ImGui::SetNextItemWidth(100);
-    if (ImGui::InputInt("steps", &reopt_steps_)) {
-      if (reopt_steps_ < 0) {
-        reopt_steps_ = 0;
-      }
-    }
-    if (pressed) {
-      Reoptimize(reopt_steps_);
-    }
-  }
-
-  ImGui::End();
-}
 
 void DeformationStage::InitDeformedMesh() {
   auto& global_state = global_controller_.GetGlobalState();
@@ -165,11 +60,50 @@ void DeformationStage::Reoptimize(size_t num_steps) {
   UpdateDeformationViews();
 }
 
+void DeformationStage::RunFromScript(const YAML::Node& cfg) {
+  if (!global_controller_.GetGlobalState().HasTargetVolumeMesh()) {
+    throw std::runtime_error(
+        "[script] deformation requires a target volume mesh; load an HDF5 or "
+        ".mesh that has one");
+  }
+
+  if (cfg["cubeness_weight"])
+    deformer_options_.cubeness_weight = cfg["cubeness_weight"].as<float>();
+  if (cfg["smoothness_weight"])
+    deformer_options_.smoothness_weight = cfg["smoothness_weight"].as<float>();
+  if (cfg["norm_eps"])
+    deformer_options_.norm_eps = cfg["norm_eps"].as<float>();
+  if (cfg["learning_rate"])
+    deformer_options_.learning_rate = cfg["learning_rate"].as<float>();
+
+  if (cfg["conformal_weight"])
+    distortion_options_.conformal_weight = cfg["conformal_weight"].as<float>();
+  if (cfg["authalic_weight"])
+    distortion_options_.authalic_weight = cfg["authalic_weight"].as<float>();
+
+  int steps = cfg["steps"] ? cfg["steps"].as<int>() : reopt_steps_;
+  reopt_steps_ = steps;
+
+  LOGI(
+      "[script] deformation: cubeness={}, smoothness={}, conformal={}, "
+      "authalic={}, lr={}, steps={}",
+      deformer_options_.cubeness_weight, deformer_options_.smoothness_weight,
+      distortion_options_.conformal_weight,
+      distortion_options_.authalic_weight, deformer_options_.learning_rate,
+      steps);
+
+  PrepareVolumetricDeformation();
+  Reoptimize(static_cast<size_t>(steps));
+}
+
 void DeformationStage::UpdateDeformationViews() {
+#if HEX_ENABLE_VULKAN
   auto& global_state = global_controller_.GetGlobalState();
-  global_controller_.GetGlobalView().UpdateDeformedMeshView(global_state);
-  global_controller_.GetGlobalView().SetVisibility(
-      GlobalView::VisibilityDeformedMesh);
+  if (auto* global_view = global_controller_.GetGlobalView()) {
+    global_view->UpdateDeformedMeshView(global_state);
+  }
+#endif
+  global_controller_.SetVisibility(VisibilityDeformedMesh);
 }
 
 }  // namespace hex

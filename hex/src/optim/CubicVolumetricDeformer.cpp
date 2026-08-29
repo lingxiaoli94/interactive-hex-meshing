@@ -16,29 +16,29 @@ CubicVolumetricDeformer::CubicVolumetricDeformer(
     const DistortionOptions& distortion_options, const Options& options)
     : distortion_options_{distortion_options}, options_{options} {
   original_vertex_positions_ =
-      MatrixXfToTensor(target_mesh.GetVertices()).cuda();
-  tets_ = MatrixXiToTensor(target_mesh.GetTets()).to(torch::kInt64).cuda();
-  original_tet_volumes_ = VectorXfToTensor(target_mesh.GetTetVolumes()).cuda();
+      MatrixXfToTensor(target_mesh.GetVertices()).to(hex::ComputeDevice());
+  tets_ = MatrixXiToTensor(target_mesh.GetTets()).to(torch::kInt64).to(hex::ComputeDevice());
+  original_tet_volumes_ = VectorXfToTensor(target_mesh.GetTetVolumes()).to(hex::ComputeDevice());
 
   total_volume_ = original_tet_volumes_.sum().item<float>();
   LOGI("Total tet volume: {}", total_volume_);
 
   surface_triangles_ = MatrixXiToTensor(target_mesh.GetSurfaceTriangles())
                            .to(torch::kInt64)
-                           .cuda();
+                           .to(hex::ComputeDevice());
   surface_triangles_areas_ =
-      VectorXfToTensor(target_mesh.GetSurfaceMesh().GetFaceAreas()).cuda();
+      VectorXfToTensor(target_mesh.GetSurfaceMesh().GetFaceAreas()).to(hex::ComputeDevice());
   total_surface_area_ = surface_triangles_areas_.sum().item<float>();
   LOGI("Total surface area: {}", total_surface_area_);
 
   surface_adjacent_pairs_ =
       MatrixXiToTensor(target_mesh.GetSurfaceMesh().GetAdjacentFacePairs())
           .to(torch::kInt64)
-          .cuda();
+          .to(hex::ComputeDevice());
   LOGI("Surface has {} adjacent triangle pairs.",
        surface_adjacent_pairs_.size(0));
 
-  X_ = MatrixXfToTensor(current_deformed_mesh.GetVertices()).cuda();
+  X_ = MatrixXfToTensor(current_deformed_mesh.GetVertices()).to(hex::ComputeDevice());
   X_.requires_grad_(true);
 
   BuildTetJacobians();
@@ -53,7 +53,7 @@ CubicVolumetricDeformer::CubicVolumetricDeformer(
 void CubicVolumetricDeformer::BuildTetJacobians() {
   Eigen::MatrixXf D_mat(4, 3);
   D_mat << -1, -1, -1, 1, 0, 0, 0, 1, 0, 0, 0, 1;
-  auto D = MatrixXfToTensor(D_mat).cuda();  // 4x3
+  auto D = MatrixXfToTensor(D_mat).to(hex::ComputeDevice());  // 4x3
   std::vector<torch::Tensor> corners;
   for (int k = 0; k < 4; k++) {
     corners.push_back(

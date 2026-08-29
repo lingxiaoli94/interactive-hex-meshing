@@ -1,9 +1,10 @@
 #pragma once
 
-#include <vkoo/core/Device.h>
-#include <vkoo/st/Material.h>
-#include <vkoo/st/Node.h>
-
+// No vkoo includes: FilteredHexMesh works on HexahedralMesh/QuadrilateralMesh
+// only, and the Device/Material/Node includes that used to be here were unused.
+// Keeping this header Vulkan-free is what lets HexahedralizationStage.h hold a
+// FilteringSetting in the HEX_ENABLE_VULKAN=OFF build. The .cpp is still
+// renderer-side and is excluded there.
 #include "models/HexahedralMesh.h"
 #include "models/QuadrilateralMesh.h"
 

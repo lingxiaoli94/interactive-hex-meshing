@@ -1,5 +1,7 @@
 #include "vkoo/core/Application.h"
 
+#include <cassert>
+
 #include "vkoo/core/Gui.h"
 #include "vkoo/logging.h"
 #include "vkoo/st/components/Script.h"
@@ -61,15 +63,39 @@ void Application::ChangeWindowSize(uint32_t new_width, uint32_t new_height) {
   glfwSetWindowSize(window_, new_width, new_height);
 }
 
-void Application::Prepare() {
-  PrepareWindow();
+void Application::Prepare(DisplayMode mode) {
+  display_mode_ = mode;
 
-  uint32_t glfw_extension_count = 0;
-  const char** glfw_extensions =
-      glfwGetRequiredInstanceExtensions(&glfw_extension_count);
+  // The GLFW window is the only true X11/display dependency. In headless mode
+  // it (and the surface/swapchain built from it) is skipped entirely.
+  if (ModeHasWindow(display_mode_)) {
+    PrepareWindow();
+  } else if (display_mode_ == DisplayMode::HeadlessVulkan) {
+    LOGI(
+        "vkoo: headless mode - skipping window, surface and swapchain "
+        "(surfaceless Vulkan).");
+  }
 
-  std::vector<const char*> instance_extensions(
-      glfw_extensions, glfw_extensions + glfw_extension_count);
+  if (!ModeHasGraphicsDevice(display_mode_)) {
+    // Close the tap. No Instance, no GetSuitableGPU(), no Device, no
+    // RenderContext -- so not one Vulkan entry point is called and no ICD,
+    // driver or validation layer needs to be present. instance_, device_,
+    // surface_ and render_context_ all stay null by construction.
+    LOGI(
+        "vkoo: no-Vulkan mode - skipping instance, physical device, logical "
+        "device and render context; no Vulkan call will be made.");
+    return;
+  }
+
+  std::vector<const char*> instance_extensions;
+  if (!IsHeadless()) {
+    // Surface extensions are only needed when we have a window to present to.
+    uint32_t glfw_extension_count = 0;
+    const char** glfw_extensions =
+        glfwGetRequiredInstanceExtensions(&glfw_extension_count);
+    instance_extensions.assign(glfw_extensions,
+                               glfw_extensions + glfw_extension_count);
+  }
   instance_extensions.push_back(
       VK_KHR_GET_PHYSICAL_DEVICE_PROPERTIES_2_EXTENSION_NAME);  // to get depth
                                                                 // resolve mode
@@ -77,20 +103,35 @@ void Application::Prepare() {
   instance_ = std::make_unique<Instance>(name_, instance_extensions,
                                          enable_validation_layer_);
 
-  CreateSurface();
+  if (!IsHeadless()) {
+    CreateSurface();
+  }
 
   auto& gpu = instance_->GetSuitableGPU();
 
-  const std::vector<const char*> kDeviceExtensions = {
-      VK_KHR_SWAPCHAIN_EXTENSION_NAME,
+  // VK_KHR_swapchain depends on the VK_KHR_surface instance extension, so it is
+  // only requested when not headless. surface_ stays VK_NULL_HANDLE in headless
+  // mode; Device queries present support with IsPresentSupported(), which
+  // already no-ops on a null surface.
+  std::vector<const char*> device_extensions = {
       VK_KHR_DEPTH_STENCIL_RESOLVE_EXTENSION_NAME,
       VK_KHR_CREATE_RENDERPASS_2_EXTENSION_NAME,
       VK_KHR_MAINTENANCE2_EXTENSION_NAME, VK_KHR_MULTIVIEW_EXTENSION_NAME};
-  device_ = std::make_unique<Device>(gpu, surface_, kDeviceExtensions);
+  if (!IsHeadless()) {
+    device_extensions.push_back(VK_KHR_SWAPCHAIN_EXTENSION_NAME);
+  }
+  device_ = std::make_unique<Device>(gpu, surface_, device_extensions);
 
-  render_context_ = std::make_unique<RenderContext>(
-      *device_, surface_, starter_width_, starter_height_);
-  PrepareRenderContext();
+  if (!IsHeadless()) {
+    render_context_ = std::make_unique<RenderContext>(
+        *device_, surface_, starter_width_, starter_height_);
+    PrepareRenderContext();
+  }
+}
+
+bool Application::HasAnyVulkanObject() const {
+  return instance_ != nullptr || device_ != nullptr ||
+         surface_ != VK_NULL_HANDLE || render_context_ != nullptr;
 }
 
 void Application::PrepareRenderContext() { render_context_->Prepare(); }
@@ -141,6 +182,11 @@ void Application::SetViewPortAndScissor(CommandBuffer& command_buffer,
 }
 
 Application::~Application() {
+  // Invariant: a surface can only have been created from an instance. The two
+  // independent null checks below are correct only while that holds, so state
+  // it rather than relying on them happening to line up.
+  assert(surface_ == VK_NULL_HANDLE || instance_ != nullptr);
+
   if (device_) {
     device_->WaitIdle();
   }
@@ -154,8 +200,12 @@ Application::~Application() {
   }
   instance_.reset();
 
-  glfwDestroyWindow(window_);
-  glfwTerminate();
+  // In headless mode no window was ever created (window_ stays nullptr and GLFW
+  // was never initialized), so skip the window/GLFW teardown.
+  if (window_ != nullptr) {
+    glfwDestroyWindow(window_);
+    glfwTerminate();
+  }
 }
 
 void Application::MainLoop() {
@@ -311,9 +361,16 @@ float Application::GetDpiFactor() const {
 }
 
 void Application::GetWindowSize(uint32_t& width, uint32_t& height) {
-  VkExtent2D extent = render_context_->GetSurfaceExtent();
-  width = extent.width;
-  height = extent.height;
+  if (render_context_) {
+    VkExtent2D extent = render_context_->GetSurfaceExtent();
+    width = extent.width;
+    height = extent.height;
+  } else {
+    // Headless: no swapchain/surface. Report the nominal starter size so
+    // callers (e.g. the scene camera aspect ratio) have sane values.
+    width = starter_width_;
+    height = starter_height_;
+  }
 }
 
 float Application::GetWindowAspectRatio() {

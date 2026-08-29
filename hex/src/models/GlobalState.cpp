@@ -121,8 +121,25 @@ const HexahedralMesh& GlobalState::GetResultMesh() const {
 
 bool GlobalState::CheckPolycubeConsistency() const {
   assert(HasPolycube() && HasPolycubeInfo());
-  return polycube_->GetCuboidCount() == polycube_info_->names.size() &&
-         polycube_info_->names.size() == polycube_info_->ordering.size();
+  const size_t cuboid_count =
+      static_cast<size_t>(polycube_->GetCuboidCount());
+  if (polycube_info_->names.size() != cuboid_count ||
+      polycube_info_->ordering.size() != cuboid_count ||
+      polycube_info_->locked.size() != cuboid_count) {
+    return false;
+  }
+
+  // `ordering` is later used as an index permutation. Validate it at the load
+  // boundary so malformed restart metadata cannot cause out-of-bounds access.
+  std::vector<bool> seen(cuboid_count, false);
+  for (int index : polycube_info_->ordering) {
+    if (index < 0 || static_cast<size_t>(index) >= cuboid_count ||
+        seen[static_cast<size_t>(index)]) {
+      return false;
+    }
+    seen[static_cast<size_t>(index)] = true;
+  }
+  return true;
 }
 
 const std::unordered_map<std::string, float> GlobalState::GetFloatDict() const {

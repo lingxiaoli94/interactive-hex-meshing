@@ -1,6 +1,8 @@
 #include "vkoo/utils.h"
 
+#if HEX_ENABLE_VULKAN
 #include <vkoo/core/Device.h>
+#endif
 
 namespace vkoo {
 std::string GetShaderPath() { return SHADER_PATH; }
@@ -24,6 +26,7 @@ std::vector<uint8_t> ReadBinaryFile(const std::string& filename) {
   return buffer;
 }
 
+#if HEX_ENABLE_VULKAN
 uint32_t FindMemoryType(const Device& device, uint32_t type_filter,
                         VkMemoryPropertyFlags properties) {
   VkPhysicalDeviceMemoryProperties mem_properties;
@@ -40,6 +43,7 @@ uint32_t FindMemoryType(const Device& device, uint32_t type_filter,
 
   throw std::runtime_error("Failed to find a suitable memory type!");
 }
+#endif  // HEX_ENABLE_VULKAN
 
 std::unique_ptr<std::vector<glm::vec3>> EstimateNormals(
     const std::vector<glm::vec3>& positions,

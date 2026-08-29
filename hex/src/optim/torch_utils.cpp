@@ -4,6 +4,14 @@
 
 using namespace torch::indexing;
 namespace hex {
+torch::Device& ComputeDevice() {
+  // Default CUDA preserves the original behavior; --device cpu flips it.
+  static torch::Device device{torch::kCUDA};
+  return device;
+}
+
+void SetComputeDevice(torch::Device device) { ComputeDevice() = device; }
+
 torch::Tensor VectorXfToTensor(const Eigen::VectorXf& vec) {
   auto res = torch::zeros({vec.rows()}, torch::dtype(torch::kFloat32));
   Eigen::Map<Eigen::VectorXf> mp{res.data_ptr<float>(), vec.rows()};

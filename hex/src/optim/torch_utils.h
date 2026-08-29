@@ -7,6 +7,13 @@
 #include "models/MultiDimArray.h"
 
 namespace hex {
+// The active compute device for libtorch tensors + geomlib kernels. Defaults to
+// CUDA (unchanged behavior); set once at startup from the `--device cpu|cuda`
+// flag. Replaces the previously hard-coded `.cuda()` calls so the pipeline can
+// run on CPU. The Vulkan *view* device is independent of this (see --headless).
+torch::Device& ComputeDevice();
+void SetComputeDevice(torch::Device device);
+
 torch::Tensor VectorXfToTensor(const Eigen::VectorXf& vec);
 torch::Tensor VectorXiToTensor(const Eigen::VectorXi& vec);
 

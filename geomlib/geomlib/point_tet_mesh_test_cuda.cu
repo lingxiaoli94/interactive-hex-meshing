@@ -1,10 +1,14 @@
-#include "point_tet_mesh_test.h"
+#include "point_tet_mesh_test_cuda.h"
 
 #include <ATen/cuda/CUDAContext.h>
 #include <c10/cuda/CUDAGuard.h>
 
 #include "common.cuh"
+#include "point_tet_mesh_test_impl.h"
 #include "utils.cuh"
+
+// Only ever compiled in a CUDA build: geomlib/geomlib/CMakeLists.txt adds this
+// file to the target exclusively when HEX_ENABLE_CUDA is ON.
 
 namespace geomlib {
 namespace {
@@ -24,15 +28,7 @@ __global__ void PointTetMeshTestKernel(const scalar_t* __restrict__ points,
 
   int winding = 0;
   for (size_t j = tid; j < num_tets; j += blockDim.x) {
-    auto p = &points[i * 3];
-    auto v0 = &vertices[3 * tets[4 * j]];
-    auto v1 = &vertices[3 * tets[4 * j + 1]];
-    auto v2 = &vertices[3 * tets[4 * j + 2]];
-    auto v3 = &vertices[3 * tets[4 * j + 3]];
-    if (IsPointInTetrahedron<scalar_t>(
-            MakeVec3<scalar_t>::FromRaw(p), MakeVec3<scalar_t>::FromRaw(v0),
-            MakeVec3<scalar_t>::FromRaw(v1), MakeVec3<scalar_t>::FromRaw(v2),
-            MakeVec3<scalar_t>::FromRaw(v3))) {
+    if (detail::IsPointInTetAt<scalar_t>(&points[i * 3], vertices, tets, j)) {
       winding += 1;
     }
   }
@@ -58,27 +54,13 @@ __global__ void PointTetMeshTestKernel(const scalar_t* __restrict__ points,
 }
 }  // namespace
 
-torch::Tensor PointTetMeshTest(torch::Tensor points, torch::Tensor vertices,
-                               torch::Tensor tets) {
-  CHECK_INPUT(points);
-  CHECK_INPUT(vertices);
-  CHECK_INPUT(tets);
-
-  TORCH_CHECK(points.size(1) == 3);
-  TORCH_CHECK(vertices.size(1) == 3);
-  TORCH_CHECK(tets.size(1) == 4);
-  TORCH_CHECK(points.dtype() == torch::kFloat32 ||
-              points.dtype() == torch::kFloat64);
-  TORCH_CHECK(tets.dtype() == torch::kInt32);
-  TORCH_CHECK(points.dtype() == vertices.dtype());
-
+void PointTetMeshTestCuda(torch::Tensor points, torch::Tensor vertices,
+                          torch::Tensor tets, torch::Tensor result_signs) {
   at::cuda::CUDAGuard device_guard{points.device()};
   cudaStream_t stream = at::cuda::getCurrentCUDAStream();
 
   size_t num_points = points.size(0);
   size_t num_tets = tets.size(0);
-  torch::Tensor result_signs =
-      torch::zeros({static_cast<int>(num_points)}, tets.options()).contiguous();
 
   size_t num_threads = 128;
   dim3 num_blocks(num_points);
@@ -93,7 +75,5 @@ torch::Tensor PointTetMeshTest(torch::Tensor points, torch::Tensor vertices,
   });
 
   AT_CUDA_CHECK(cudaGetLastError());
-
-  return result_signs;
 }
 }  // namespace geomlib
